@@ -202,4 +202,4 @@ class GreaterThanOrEqual(BaseCriterion):
 class DataFrame(object):
 
     def __init__(self):
-        raise NotImplementedError
+        raise NotImplementedError("TODO: figure out if this is needed")
