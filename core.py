@@ -1,4 +1,4 @@
-import uuid
+# import uuid
 
 # TODO: add more supported types
 SUPPORTED_TYPES = [int, float, str]
@@ -8,10 +8,17 @@ def _is_supported_constant(x):
     return any(isinstance(x, t) for t in SUPPORTED_TYPES)
 
 
+# TODO: switch to uuids when done testing
+COUNT = 0
+
+
 # TODO: maybe think of a better name than thunk
 class BaseThunk(object):
     def __init__(self, name=None):
-        self.name = name or uuid.uuid4().hex
+        # self.name = name or uuid.uuid4().hex
+        global COUNT
+        self.name = name or 'T' + str(COUNT)
+        COUNT += 1
 
     def sql(self):
         raise TypeError('Objects of type {} cannot be converted to a SQL query'
@@ -43,6 +50,15 @@ class BaseTable(BaseThunk):
             raise NotImplementedError('TODO: iloc/loc based access')
         else:
             raise TypeError('Unsupported indexing type {}'.format(type(x)))
+
+    def join(self, other, on=None, **args):
+        """ TODO: support other pandas join arguments """
+        assert(isinstance(other, BaseTable))
+        if on is None:
+            raise NotImplementedError('TODO: implement cross join')
+        else:
+            assert(isinstance(on, str))
+            return Join(self, other, self[on] == other[on])
 
     def __eq__(self, other):
         return self._comparison(other, Equal)
@@ -94,19 +110,22 @@ class Projection(BaseTable):
         self.cols = cols
 
     def __str__(self):
-        attrs = ', '.join('{}.{}'.format(self.source, col)
+        attrs = ', '.join('{}.{}'.format(self.source.name, col)
                           for col in self.cols)
         if len(self.cols) > 1:
             attrs = '({})'.format(attrs)
         return attrs
 
     def sql(self):
-        if self.source.is_base_table:
-            source_sql = self.source.name
-        else:
-            source_sql = '({})'.format(self.source.sql())
+        query = []
+        if not self.source.is_base_table:
+            query.append('WITH {} AS ({})'.format(self.source.name,
+                                                  self.source.sql()))
 
-        return 'SELECT {} FROM {}'.format(', '.join(self.cols), source_sql)
+        query.append('SELECT {} FROM {}'.format(', '.join(self.cols),
+                                                self.source.name))
+
+        return ' '.join(query)
 
 
 class Selection(BaseTable):
@@ -114,11 +133,13 @@ class Selection(BaseTable):
         assert(isinstance(source, BaseTable))
         assert(isinstance(criterion, BaseCriterion))
 
-        sources = criterion.sources
-        if len(sources) != 0 and source.name not in sources:
-            raise ValueError('Cannot select from table {} with a '
-                             'criterion for table(s) {}'
-                             .format(source.name, sources))
+        # TODO: have well thought out type checking
+        # sources = criterion.sources
+        # print('[Selection] criterion.sources', criterion.sources)
+        # if len(sources) != 0 and source.name not in sources:
+        # raise ValueError('Cannot select from table {} with a '
+        #  'criterion for table(s) {}'
+        #  .format(source.name, sources))
 
         super().__init__(name=name)
         self.source = source
@@ -129,15 +150,59 @@ class Selection(BaseTable):
         return 'Select({}, {})'.format(self.source, self.criterion)
 
     def sql(self):
-        if self.source.is_base_table:
-            source_sql = self.source.name
-        else:
-            source_sql = '({})'.format(self.source.sql())
+        query = []
 
-        return 'SELECT * FROM {} WHERE {}'.format(source_sql, self.criterion)
+        if not self.source.is_base_table:
+            query.append('WITH {} AS ({})'.format(self.source.name,
+                                                  self.source.sql()))
+
+        query.append('SELECT * FROM {} WHERE {}'.format(self.source.name,
+                                                        self.criterion))
+
+        return ' '.join(query)
+
+
+class Join(BaseTable):
+    def __init__(self, source_1, source_2, criterion, name=None):
+        assert(isinstance(source_1, BaseTable))
+        assert(isinstance(source_2, BaseTable))
+        assert(isinstance(criterion, BaseCriterion))
+
+        # TODO: have well thought out type checking
+        # given_sources = {source_1.name, source_2.name}
+        # if not criterion.sources.issubset(given_sources):
+        # raise ValueError('Cannot join tables {} with a '
+        #  'criterion for table(s) {}'
+        #  .format(given_sources, criterion.sources))
+
+        super().__init__(name=name)
+        self.source_1, self.source_2 = source_1, source_2
+        self.base_tables = [source_1.base_table, source_2.base_table]
+        self.criterion = criterion
+
+    def __str__(self):
+        return 'Join({}, {}, {})'.format(self.source_1, self.source_2,
+                                         self.criterion)
+
+    def sql(self):
+        query = []
+
+        if not self.source_1.is_base_table:
+            query.append('WITH {} AS ({})'.format(self.source_1.name,
+                                                  self.source_1.sql()))
+        if not self.source_2.is_base_table:
+            query.append('WITH {} AS ({})'.format(self.source_2.name,
+                                                  self.source_2.sql()))
+
+        query.append('SELECT * FROM {} JOIN {} ON {}'
+                     .format(self.source_1.name, self.source_2.name,
+                             self.criterion))
+
+        return ' '.join(query)
 
 
 class Constant(BaseThunk):
+
     def __init__(self, value, name=None):
         super().__init__(name=name)
         if not _is_supported_constant(value):
