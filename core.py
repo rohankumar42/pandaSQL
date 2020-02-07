@@ -1,4 +1,6 @@
 # import uuid
+import pandas as pd
+import sqlite3
 
 # TODO: add more supported types
 SUPPORTED_TYPES = [int, float, str]
@@ -10,6 +12,7 @@ def _is_supported_constant(x):
 
 # TODO: switch to uuids when done testing
 COUNT = 0
+SQL_CON = sqlite3.connect(":memory:")
 
 
 # TODO: maybe think of a better name than thunk
@@ -40,6 +43,16 @@ class BaseTable(BaseThunk):
     @property
     def is_base_table(self):
         return self.base_table is self
+
+    @classmethod
+    def from_pandas(cls, df: pd.DataFrame, name=None):
+        table = cls(name=name)
+        df.to_sql(name=table.name, con=SQL_CON)
+        return table
+
+    def compute(self):
+        query = self.sql()
+        return pd.read_sql_query(query, con=SQL_CON)
 
     def __getitem__(self, x):
         if isinstance(x, str) or isinstance(x, list):  # TODO: check valid cols
