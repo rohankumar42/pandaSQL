@@ -105,7 +105,19 @@ class TestPandaSQL(unittest.TestCase):
         self.assertEqual(ordered[2].name, joined.name)
 
     def test_join_with_dependencies(self):
-        raise NotImplementedError("TODO: write this test")
+        df = pd.DataFrame([{'num': i, 'val': str(i)} for i in range(10)])
+        T1 = BaseTable.from_pandas(df)
+        T2 = BaseTable.from_pandas(df)
+        S1 = T1[T1['num'] < 5]
+        S1.name = 'S1'
+        S2 = T2[T2['num'] >= 5]
+        S2.name = 'S2'
+        joined = S1.join(S2, on='num')
+
+        self.assertIsInstance(joined, Join)
+        self.assertEqual(joined.sql(), 'WITH S1 AS ({}), S2 AS ({}) '
+                         'SELECT * FROM S1 JOIN S2 ON S1.num = S2.num'
+                         .format(S1.sql(False), S2.sql(False)))
 
 
 if __name__ == "__main__":
