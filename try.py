@@ -35,8 +35,4 @@ F = A.join(D, on='num')
 print(F.sql())
 G = D.join(E, on='num')
 print(G.sql())
-# TODO: this fails because multiple "WITH {} AS {}" are apparently not valid
-# SQL syntax. Probably need to precisely track dependencies, and before the
-# main SQL query, run a topological sort to make one big common table
-# expression section
 print(G.compute())

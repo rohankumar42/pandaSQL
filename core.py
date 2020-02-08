@@ -1,29 +1,92 @@
 # import uuid
-import pandas as pd
 import sqlite3
+import pandas as pd
+from queue import Queue
+from collections import defaultdict
 
 # TODO: add more supported types
 SUPPORTED_TYPES = [int, float, str]
+# TODO: switch to uuids when done testing
+COUNT = 0
+SQL_CON = sqlite3.connect(":memory:")
 
 
 def _is_supported_constant(x):
     return any(isinstance(x, t) for t in SUPPORTED_TYPES)
 
 
-# TODO: switch to uuids when done testing
-COUNT = 0
-SQL_CON = sqlite3.connect(":memory:")
+def _get_dependency_graph(table):
+    assert isinstance(table, BaseTable)
+    dependencies = {}
+
+    def add_dependencies(child):
+        dependencies[child] = list(child.sources)
+        for parent in dependencies[child]:
+            if parent not in dependencies:
+                add_dependencies(parent)
+
+    add_dependencies(table)
+    return dependencies
 
 
-# TODO: maybe think of a better name than thunk
+def _topological_sort(graph):
+    # Reversed graph: node to children that depend on it
+    parent_to_child = defaultdict(list)
+    for child, parents in graph.items():
+        for parent in parents:
+            parent_to_child[parent].append(child)
+
+    ready = Queue()  # Nodes that have 0 dependencies
+    num_deps = {node: len(deps) for (node, deps) in graph.items()}
+    for node, count in num_deps.items():
+        if count == 0:
+            ready.put(node)
+    if ready.empty():
+        raise ValueError('Cyclic dependency graph! Invalid computation.')
+
+    results = []    # All nodes in order, with dependencies before dependents
+    while not ready.empty():
+        node = ready.get()
+        results.append(node)
+
+        # Update dependency counts for all dependents of node
+        for child in parent_to_child[node]:
+            num_deps[child] -= 1
+            if num_deps[child] == 0:  # Child has no more dependencies
+                ready.put(child)
+
+    if len(results) != len(graph):
+        raise RuntimeError('Expected {} nodes but could only sort {}'
+                           .format(len(graph), len(results)))
+
+    return results
+
+
+def _define_dependencies(table):
+    graph = _get_dependency_graph(table)
+    ordered_deps = _topological_sort(graph)
+
+    common_table_exprs = [
+        '{} AS ({})'.format(t.name, t.sql(dependencies=False))
+        for t in ordered_deps if not t.is_base_table and t is not table
+    ]
+
+    if len(common_table_exprs) > 0:
+        return 'WITH ' + ',\n'.join(common_table_exprs)
+    else:
+        return None
+
+
 class BaseThunk(object):
+    # TODO: maybe think of a better name than thunk
     def __init__(self, name=None):
         # self.name = name or uuid.uuid4().hex
         global COUNT
         self.name = name or 'T' + str(COUNT)
         COUNT += 1
+        self.sources = []
 
-    def sql(self):
+    def sql(self, dependencies=True):
         raise TypeError('Objects of type {} cannot be converted to a SQL query'
                         .format(type(self)))
 
@@ -32,6 +95,9 @@ class BaseThunk(object):
 
     def __repr__(self):
         return str(self)
+
+    def __hash__(self):
+        return hash(self.name)
 
 
 class BaseTable(BaseThunk):
@@ -65,7 +131,7 @@ class BaseTable(BaseThunk):
             raise TypeError('Unsupported indexing type {}'.format(type(x)))
 
     def join(self, other, on=None, **args):
-        """ TODO: support other pandas join arguments """
+        """TODO: support other pandas join arguments"""
         assert(isinstance(other, BaseTable))
         if on is None:
             raise NotImplementedError('TODO: implement cross join')
@@ -95,6 +161,9 @@ class BaseTable(BaseThunk):
         return how_class(self._make_projection_or_constant(self),
                          self._make_projection_or_constant(other))
 
+    def __hash__(self):
+        return super().__hash__()
+
     @staticmethod
     def _make_projection_or_constant(x):
         if isinstance(x, Projection):
@@ -118,25 +187,27 @@ class Projection(BaseTable):
                             .format(type(col)))
 
         super().__init__(name=name)
-        self.source = source
-        self.base_table = self.source.base_table
+        self.sources = [source]
+        self.base_table = source.base_table
         self.cols = cols
 
     def __str__(self):
-        attrs = ', '.join('{}.{}'.format(self.source.name, col)
+        attrs = ', '.join('{}.{}'.format(self.sources[0].name, col)
                           for col in self.cols)
         if len(self.cols) > 1:
             attrs = '({})'.format(attrs)
         return attrs
 
-    def sql(self):
+    def sql(self, dependencies=True):
         query = []
-        if not self.source.is_base_table:
-            query.append('WITH {} AS ({})'.format(self.source.name,
-                                                  self.source.sql()))
+
+        if dependencies:
+            common_table_expr = _define_dependencies(self)
+            if common_table_expr is not None:
+                query.append(common_table_expr)
 
         query.append('SELECT {} FROM {}'.format(', '.join(self.cols),
-                                                self.source.name))
+                                                self.sources[0].name))
 
         return ' '.join(query)
 
@@ -147,29 +218,24 @@ class Selection(BaseTable):
         assert(isinstance(criterion, BaseCriterion))
 
         # TODO: have well thought out type checking
-        # sources = criterion.sources
-        # print('[Selection] criterion.sources', criterion.sources)
-        # if len(sources) != 0 and source.name not in sources:
-        # raise ValueError('Cannot select from table {} with a '
-        #  'criterion for table(s) {}'
-        #  .format(source.name, sources))
 
         super().__init__(name=name)
-        self.source = source
-        self.base_table = self.source.base_table
+        self.sources = [source]
+        self.base_table = source.base_table
         self.criterion = criterion
 
     def __str__(self):
-        return 'Select({}, {})'.format(self.source, self.criterion)
+        return 'Select({}, {})'.format(self.sources[0], self.criterion)
 
-    def sql(self):
+    def sql(self, dependencies=True):
         query = []
 
-        if not self.source.is_base_table:
-            query.append('WITH {} AS ({})'.format(self.source.name,
-                                                  self.source.sql()))
+        if dependencies:
+            common_table_expr = _define_dependencies(self)
+            if common_table_expr is not None:
+                query.append(common_table_expr)
 
-        query.append('SELECT * FROM {} WHERE {}'.format(self.source.name,
+        query.append('SELECT * FROM {} WHERE {}'.format(self.sources[0].name,
                                                         self.criterion))
 
         return ' '.join(query)
@@ -182,33 +248,27 @@ class Join(BaseTable):
         assert(isinstance(criterion, BaseCriterion))
 
         # TODO: have well thought out type checking
-        # given_sources = {source_1.name, source_2.name}
-        # if not criterion.sources.issubset(given_sources):
-        # raise ValueError('Cannot join tables {} with a '
-        #  'criterion for table(s) {}'
-        #  .format(given_sources, criterion.sources))
 
         super().__init__(name=name)
-        self.source_1, self.source_2 = source_1, source_2
+        self.sources = [source_1, source_2]
         self.base_tables = [source_1.base_table, source_2.base_table]
         self.criterion = criterion
 
     def __str__(self):
-        return 'Join({}, {}, {})'.format(self.source_1, self.source_2,
+        source_1, source_2 = self.sources
+        return 'Join({}, {}, {})'.format(source_1, source_2,
                                          self.criterion)
 
-    def sql(self):
+    def sql(self, dependencies=True):
         query = []
 
-        if not self.source_1.is_base_table:
-            query.append('WITH {} AS ({})'.format(self.source_1.name,
-                                                  self.source_1.sql()))
-        if not self.source_2.is_base_table:
-            query.append('WITH {} AS ({})'.format(self.source_2.name,
-                                                  self.source_2.sql()))
+        if dependencies:
+            common_table_expr = _define_dependencies(self)
+            if common_table_expr is not None:
+                query.append(common_table_expr)
 
         query.append('SELECT * FROM {} JOIN {} ON {}'
-                     .format(self.source_1.name, self.source_2.name,
+                     .format(self.sources[0].name, self.sources[1].name,
                              self.criterion))
 
         return ' '.join(query)
@@ -235,16 +295,15 @@ class BaseCriterion(BaseThunk):
 
         super().__init__(name=name)
         self.operation = operation
-        self.source_1 = source_1
-        self.source_2 = source_2
-        self.sources = set()
-        if isinstance(self.source_1, Projection):
-            self.sources.add(self.source_1.base_table.name)
-        if isinstance(self.source_2, Projection):
-            self.sources.add(self.source_2.base_table.name)
+        self.sources = [source_1, source_2]
+        # if isinstance(source_1, Projection):
+        # self.sources.append(source_1.base_table)
+        # if isinstance(source_2, Projection):
+        # self.sources.append(source_2.base_table)
 
     def __str__(self):
-        return '{} {} {}'.format(self.source_1, self.operation, self.source_2)
+        source_1, source_2 = self.sources
+        return '{} {} {}'.format(source_1, self.operation, source_2)
 
 
 class Equal(BaseCriterion):

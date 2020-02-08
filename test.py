@@ -1,7 +1,8 @@
 import unittest
 import pandas as pd
 import sqlite3
-from core import BaseTable, Projection, Selection, Join, SQL_CON
+from core import BaseTable, Projection, Selection, Join, SQL_CON, \
+    _get_dependency_graph, _topological_sort
 
 
 class TestPandaSQL(unittest.TestCase):
@@ -68,6 +69,40 @@ class TestPandaSQL(unittest.TestCase):
 
         sql = joined.sql()
         self.assertEqual(sql, 'SELECT * FROM S JOIN T ON S.num = T.num')
+
+    def test_get_dependency_graph(self):
+        df1 = BaseTable.from_pandas(pd.DataFrame(
+            [{'num': i, 'val1': str(i*2)} for i in range(10)]))
+        df1.name = 'S'
+        df2 = BaseTable.from_pandas(pd.DataFrame(
+            [{'num': i, 'val2': str(i*2)} for i in range(10)]))
+        df2.name = 'T'
+        joined = df1.join(df2, on='num')
+
+        graph = _get_dependency_graph(joined)
+        self.assertIn(df1, graph)
+        self.assertIn(df2, graph)
+        self.assertIn(joined, graph)
+        self.assertIn(df1, set(graph[joined]))
+        self.assertIn(df2, set(graph[joined]))
+        self.assertEqual(len(graph[joined]), 2)
+        self.assertEqual(len(graph[df1]), 0)
+        self.assertEqual(len(graph[df2]), 0)
+
+    def test_topological_sort(self):
+        df1 = BaseTable.from_pandas(pd.DataFrame(
+            [{'num': i, 'val1': str(i*2)} for i in range(10)]))
+        df1.name = 'S'
+        df2 = BaseTable.from_pandas(pd.DataFrame(
+            [{'num': i, 'val2': str(i*2)} for i in range(10)]))
+        df2.name = 'T'
+        joined = df1.join(df2, on='num')
+
+        graph = _get_dependency_graph(joined)
+        ordered = _topological_sort(graph)
+        self.assertEqual(ordered[0].name, 'S')
+        self.assertEqual(ordered[1].name, 'T')
+        self.assertEqual(ordered[2].name, joined.name)
 
 
 if __name__ == "__main__":
