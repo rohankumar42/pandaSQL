@@ -104,6 +104,9 @@ class TestPandaSQL(unittest.TestCase):
         self.assertEqual(ordered[1].name, 'T')
         self.assertEqual(ordered[2].name, joined.name)
 
+    def test_join_with_dependencies(self):
+        raise NotImplementedError("TODO: write this test")
+
 
 if __name__ == "__main__":
     unittest.main()
