@@ -72,7 +72,7 @@ def _define_dependencies(table):
     ]
 
     if len(common_table_exprs) > 0:
-        return 'WITH ' + ',\n'.join(common_table_exprs)
+        return 'WITH ' + ', '.join(common_table_exprs)
     else:
         return None
 
