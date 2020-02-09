@@ -1,7 +1,7 @@
 import unittest
 import pandas as pd
 import sqlite3
-from core import BaseTable, Projection, Selection, Join, SQL_CON, \
+from core import Table, Projection, Selection, Join, SQL_CON, \
     _get_dependency_graph, _topological_sort
 
 
@@ -10,13 +10,13 @@ class TestPandaSQL(unittest.TestCase):
     # functionality to test
 
     def test_from_pandas(self):
-        df = BaseTable.from_pandas(pd.DataFrame(
+        df = Table.from_pandas(pd.DataFrame(
             [{'num': i, 'val': str(i*2)} for i in range(10)]))
-        self.assertIsInstance(df, BaseTable)
+        self.assertIsInstance(df, Table)
         self.assertIsInstance(SQL_CON, sqlite3.Connection)
 
     def test_simple_projection(self):
-        df = BaseTable.from_pandas(pd.DataFrame(
+        df = Table.from_pandas(pd.DataFrame(
             [{'num': i, 'val': str(i*2)} for i in range(10)]))
         df.name = 'T'
         proj = df['num']
@@ -26,7 +26,7 @@ class TestPandaSQL(unittest.TestCase):
         self.assertEqual(sql, 'SELECT num FROM T')
 
     def test_multiple_projection(self):
-        df = BaseTable.from_pandas(pd.DataFrame(
+        df = Table.from_pandas(pd.DataFrame(
             [{'num': i, 'val': str(i*2)} for i in range(10)]))
         df.name = 'T'
         proj = df[['num', 'val']]
@@ -36,7 +36,7 @@ class TestPandaSQL(unittest.TestCase):
         self.assertEqual(sql, 'SELECT num, val FROM T')
 
     def test_simple_selection(self):
-        df = BaseTable.from_pandas(pd.DataFrame(
+        df = Table.from_pandas(pd.DataFrame(
             [{'num': i, 'val': str(i*2)} for i in range(10)]))
         df.name = 'T'
         selection = df[df['num'] == 10]
@@ -46,7 +46,7 @@ class TestPandaSQL(unittest.TestCase):
         self.assertEqual(sql, 'SELECT * FROM T WHERE T.num = 10')
 
     def test_nested_operation(self):
-        df = BaseTable.from_pandas(pd.DataFrame(
+        df = Table.from_pandas(pd.DataFrame(
             [{'num': i, 'val': str(i*2)} for i in range(10)]))
         df.name = 'T'
         selection = df[df['num'] == 10]
@@ -58,10 +58,10 @@ class TestPandaSQL(unittest.TestCase):
                          'SELECT val FROM S')
 
     def test_simple_join(self):
-        df1 = BaseTable.from_pandas(pd.DataFrame(
+        df1 = Table.from_pandas(pd.DataFrame(
             [{'num': i, 'val1': str(i*2)} for i in range(10)]))
         df1.name = 'S'
-        df2 = BaseTable.from_pandas(pd.DataFrame(
+        df2 = Table.from_pandas(pd.DataFrame(
             [{'num': i, 'val2': str(i*2)} for i in range(10)]))
         df2.name = 'T'
         joined = df1.join(df2, on='num')
@@ -71,10 +71,10 @@ class TestPandaSQL(unittest.TestCase):
         self.assertEqual(sql, 'SELECT * FROM S JOIN T ON S.num = T.num')
 
     def test_get_dependency_graph(self):
-        df1 = BaseTable.from_pandas(pd.DataFrame(
+        df1 = Table.from_pandas(pd.DataFrame(
             [{'num': i, 'val1': str(i*2)} for i in range(10)]))
         df1.name = 'S'
-        df2 = BaseTable.from_pandas(pd.DataFrame(
+        df2 = Table.from_pandas(pd.DataFrame(
             [{'num': i, 'val2': str(i*2)} for i in range(10)]))
         df2.name = 'T'
         joined = df1.join(df2, on='num')
@@ -90,10 +90,10 @@ class TestPandaSQL(unittest.TestCase):
         self.assertEqual(len(graph[df2]), 0)
 
     def test_topological_sort(self):
-        df1 = BaseTable.from_pandas(pd.DataFrame(
+        df1 = Table.from_pandas(pd.DataFrame(
             [{'num': i, 'val1': str(i*2)} for i in range(10)]))
         df1.name = 'S'
-        df2 = BaseTable.from_pandas(pd.DataFrame(
+        df2 = Table.from_pandas(pd.DataFrame(
             [{'num': i, 'val2': str(i*2)} for i in range(10)]))
         df2.name = 'T'
         joined = df1.join(df2, on='num')
@@ -106,8 +106,8 @@ class TestPandaSQL(unittest.TestCase):
 
     def test_join_with_dependencies(self):
         df = pd.DataFrame([{'num': i, 'val': str(i)} for i in range(10)])
-        T1 = BaseTable.from_pandas(df)
-        T2 = BaseTable.from_pandas(df)
+        T1 = Table.from_pandas(df)
+        T2 = Table.from_pandas(df)
         S1 = T1[T1['num'] < 5]
         S1.name = 'S1'
         S2 = T2[T2['num'] >= 5]

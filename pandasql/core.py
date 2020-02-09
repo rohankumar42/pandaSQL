@@ -16,7 +16,7 @@ def _is_supported_constant(x):
 
 
 def _get_dependency_graph(table):
-    assert isinstance(table, BaseTable)
+    assert isinstance(table, Table)
     dependencies = {}
 
     def add_dependencies(child):
@@ -100,7 +100,7 @@ class BaseThunk(object):
         return hash(self.name)
 
 
-class BaseTable(BaseThunk):
+class Table(BaseThunk):
     # TODO: cache computed results
     def __init__(self, name=None):
         super().__init__(name=name)
@@ -123,7 +123,7 @@ class BaseTable(BaseThunk):
     def __getitem__(self, x):
         if isinstance(x, str) or isinstance(x, list):  # TODO: check valid cols
             return Projection(self, x)
-        elif isinstance(x, BaseCriterion):
+        elif isinstance(x, Criterion):
             return Selection(self, x)
         elif isinstance(x, int):
             raise NotImplementedError('TODO: iloc/loc based access')
@@ -132,7 +132,7 @@ class BaseTable(BaseThunk):
 
     def join(self, other, on=None, **args):
         """TODO: support other pandas join arguments"""
-        assert(isinstance(other, BaseTable))
+        assert(isinstance(other, Table))
         if on is None:
             raise NotImplementedError('TODO: implement cross join')
         else:
@@ -174,9 +174,9 @@ class BaseTable(BaseThunk):
             raise TypeError('Only constants and Projections are accepted')
 
 
-class Projection(BaseTable):
+class Projection(Table):
     def __init__(self, source, col, name=None):
-        assert(isinstance(source, BaseTable))
+        assert(isinstance(source, Table))
 
         if isinstance(col, str):
             cols = [col]
@@ -212,10 +212,10 @@ class Projection(BaseTable):
         return ' '.join(query)
 
 
-class Selection(BaseTable):
+class Selection(Table):
     def __init__(self, source, criterion, name=None):
-        assert(isinstance(source, BaseTable))
-        assert(isinstance(criterion, BaseCriterion))
+        assert(isinstance(source, Table))
+        assert(isinstance(criterion, Criterion))
 
         # TODO: have well thought out type checking
 
@@ -241,11 +241,11 @@ class Selection(BaseTable):
         return ' '.join(query)
 
 
-class Join(BaseTable):
+class Join(Table):
     def __init__(self, source_1, source_2, criterion, name=None):
-        assert(isinstance(source_1, BaseTable))
-        assert(isinstance(source_2, BaseTable))
-        assert(isinstance(criterion, BaseCriterion))
+        assert(isinstance(source_1, Table))
+        assert(isinstance(source_2, Table))
+        assert(isinstance(criterion, Criterion))
 
         # TODO: have well thought out type checking
 
@@ -286,7 +286,7 @@ class Constant(BaseThunk):
         return str(self.value)
 
 
-class BaseCriterion(BaseThunk):
+class Criterion(BaseThunk):
     def __init__(self, operation, source_1, source_2, name=None):
         assert(isinstance(source_1, Projection) or
                isinstance(source_1, Constant))
@@ -306,32 +306,32 @@ class BaseCriterion(BaseThunk):
         return '{} {} {}'.format(source_1, self.operation, source_2)
 
 
-class Equal(BaseCriterion):
+class Equal(Criterion):
     def __init__(self, source_1, source_2, name=None):
         super().__init__('=', source_1, source_2, name=name)
 
 
-class NotEqual(BaseCriterion):
+class NotEqual(Criterion):
     def __init__(self, source_1, source_2, name=None):
         super().__init__('<>', source_1, source_2, name=name)
 
 
-class LessThan(BaseCriterion):
+class LessThan(Criterion):
     def __init__(self, source_1, source_2, name=None):
         super().__init__('<', source_1, source_2, name=name)
 
 
-class LessThanOrEqual(BaseCriterion):
+class LessThanOrEqual(Criterion):
     def __init__(self, source_1, source_2, name=None):
         super().__init__('<=', source_1, source_2, name=name)
 
 
-class GreaterThan(BaseCriterion):
+class GreaterThan(Criterion):
     def __init__(self, source_1, source_2, name=None):
         super().__init__('>', source_1, source_2, name=name)
 
 
-class GreaterThanOrEqual(BaseCriterion):
+class GreaterThanOrEqual(Criterion):
     def __init__(self, source_1, source_2, name=None):
         super().__init__('>=', source_1, source_2, name=name)
 
