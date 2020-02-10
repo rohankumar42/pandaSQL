@@ -66,6 +66,8 @@ def _define_dependencies(table):
     graph = _get_dependency_graph(table)
     ordered_deps = _topological_sort(graph)
 
+    # TODO: instead of omitting base tables, omit all tables that are already
+    # in SQL (after storing computed results in SQLite is implemented)
     common_table_exprs = [
         '{} AS ({})'.format(t.name, t.sql(dependencies=False))
         for t in ordered_deps if not t.is_base_table and t is not table
@@ -137,6 +139,10 @@ class Table(BaseThunk):
             return Selection(self, x)
         elif isinstance(x, int):
             raise NotImplementedError('TODO: iloc/loc based access')
+        elif isinstance(x, slice):
+            if x.start is not None or x.step is not None:
+                raise ValueError('Only slices of the form df[:n] are accepted')
+            return self if x.stop is None else Limit(self, n=x.stop)
         else:
             raise TypeError('Unsupported indexing type {}'.format(type(x)))
 
@@ -279,6 +285,29 @@ class Join(Table):
         query.append('SELECT * FROM {} JOIN {} USING ({})'
                      .format(self.sources[0].name, self.sources[1].name,
                              ','.join(self.join_keys)))
+
+        return ' '.join(query)
+
+
+class Limit(Table):
+    def __init__(self, source, n, name=None):
+        assert(isinstance(source, Table))
+
+        super().__init__(name=name)
+        self.sources = [source]
+        self.base_table = source.base_table
+        self.n = n
+
+    def sql(self, dependencies=True):
+        query = []
+
+        if dependencies:
+            common_table_expr = _define_dependencies(self)
+            if common_table_expr is not None:
+                query.append(common_table_expr)
+
+        query.append('SELECT * FROM {} LIMIT {}'
+                     .format(self.sources[0].name, self.n))
 
         return ' '.join(query)
 

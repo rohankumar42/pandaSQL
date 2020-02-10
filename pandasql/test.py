@@ -58,7 +58,6 @@ class TestPandaSQL(unittest.TestCase):
         base_df = pd.DataFrame([{'n': i, 's': str(i*2)} for i in range(10)])
         df = Table(base_df)
         selection = df[df['n'] == 5]
-        selection.name = 'S'
         proj = selection['s']
 
         sql = proj.sql()
@@ -68,6 +67,30 @@ class TestPandaSQL(unittest.TestCase):
 
         expected = base_df[base_df['n'] == 5][['s']]
         self.assertTableEqualsPandas(proj, expected)
+
+    def test_limit_after_selection(self):
+        base_df = pd.DataFrame([{'n': i, 's': str(i*2)} for i in range(10)])
+        df = Table(base_df)
+        selection = df[df['n'] != 0]
+        limit = selection[:5]
+
+        sql = limit.sql()
+        self.assertEqual(sql, 'WITH {} AS (SELECT * FROM {} WHERE {}.n <> 0) '
+                         'SELECT * FROM {} LIMIT 5'
+                         .format(selection.name, df.name,
+                                 df.name, selection.name))
+
+        expected = base_df[base_df['n'] != 0][:5]
+        self.assertTableEqualsPandas(limit, expected)
+
+        no_limit = selection[:]
+
+        sql = no_limit.sql()
+        self.assertEqual(sql, 'SELECT * FROM {} WHERE {}.n <> 0'
+                         .format(df.name, df.name))
+
+        expected = base_df[base_df['n'] != 0][:]
+        self.assertTableEqualsPandas(no_limit, expected)
 
     def test_simple_join(self):
         base_df_1 = pd.DataFrame([{'n': i, 's1': str(i*2)} for i in range(10)])
