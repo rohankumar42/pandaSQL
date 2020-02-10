@@ -296,19 +296,38 @@ class Constant(BaseThunk):
 
 
 class Criterion(BaseThunk):
-    def __init__(self, operation, source_1, source_2, name=None):
-        assert(isinstance(source_1, Projection) or
-               isinstance(source_1, Constant))
-        assert(isinstance(source_2, Projection) or
-               isinstance(source_2, Constant))
+    def __init__(self, operation, source_1, source_2=None,
+                 name=None, simple=True):
+        if simple:
+            assert(isinstance(source_1, Projection) or
+                   isinstance(source_1, Constant))
+            if source_2 is not None:
+                assert(isinstance(source_2, Projection) or
+                       isinstance(source_2, Constant))
+        else:
+            assert(isinstance(source_1, Criterion))
+            if source_2 is not None:
+                assert(isinstance(source_2, Criterion))
 
         super().__init__(name=name)
         self.operation = operation
-        self.sources = [source_1, source_2]
+        self.sources = [source_1]
+        if source_2 is not None:
+            self.sources.append(source_2)
 
     def __str__(self):
+        '''Default for binary Criterion objects'''
         source_1, source_2 = self.sources
         return '{} {} {}'.format(source_1, self.operation, source_2)
+
+    def __and__(self, other):
+        return And(self, other)
+
+    def __or__(self, other):
+        return Or(self, other)
+
+    def __invert__(self):
+        return Not(self)
 
 
 class Equal(Criterion):
@@ -339,6 +358,24 @@ class GreaterThan(Criterion):
 class GreaterThanOrEqual(Criterion):
     def __init__(self, source_1, source_2, name=None):
         super().__init__('>=', source_1, source_2, name=name)
+
+
+class And(Criterion):
+    def __init__(self, source_1, source_2, name=None):
+        super().__init__('AND', source_1, source_2, name=name, simple=False)
+
+
+class Or(Criterion):
+    def __init__(self, source_1, source_2, name=None):
+        super().__init__('OR', source_1, source_2, name=name, simple=False)
+
+
+class Not(Criterion):
+    def __init__(self, source, name=None):
+        super().__init__('NOT', source, name=name, simple=False)
+
+    def __str__(self):
+        return 'NOT ({})'.format(self.sources[0])
 
 
 def read_csv(csv_file, name=None):

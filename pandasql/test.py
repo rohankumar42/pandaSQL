@@ -1,13 +1,21 @@
 import unittest
 import pandas as pd
-import sqlite3
-from core import Table, Projection, Selection, Join, SQL_CON, \
+from core import Table, Projection, Selection, Join, \
     _get_dependency_graph, _topological_sort
 
 
 class TestPandaSQL(unittest.TestCase):
     # TODO: refactor into multiple unit tests when there is enough
     # functionality to test
+
+    def assertTableEqualsPandas(self, table: Table, expected_df: pd.DataFrame):
+        result = table.compute()
+
+        # Ignore Pandas index for the comparison
+        result.reset_index(drop=True, inplace=True)
+        expected_df.reset_index(drop=True, inplace=True)
+
+        pd.testing.assert_frame_equal(result, expected_df)
 
     def test_simple_projection(self):
         base_df = pd.DataFrame([{'n': i, 's': str(i*2)} for i in range(10)])
@@ -18,9 +26,8 @@ class TestPandaSQL(unittest.TestCase):
         sql = proj.sql()
         self.assertEqual(sql, 'SELECT n FROM {}'.format(df.name))
 
-        result = proj.compute()
         expected = base_df[['n']]
-        pd.testing.assert_frame_equal(result, expected)
+        self.assertTableEqualsPandas(proj, expected)
 
     def test_multiple_projection(self):
         base_df = pd.DataFrame([{'n': i, 's': str(i*2)} for i in range(10)])
@@ -31,9 +38,8 @@ class TestPandaSQL(unittest.TestCase):
         sql = proj.sql()
         self.assertEqual(sql, 'SELECT n, s FROM {}'.format(df.name))
 
-        result = proj.compute()
         expected = base_df[['n', 's']]
-        pd.testing.assert_frame_equal(result, expected)
+        self.assertTableEqualsPandas(proj, expected)
 
     def test_simple_selection(self):
         base_df = pd.DataFrame([{'n': i, 's': str(i*2)} for i in range(10)])
@@ -45,13 +51,8 @@ class TestPandaSQL(unittest.TestCase):
         self.assertEqual(sql, 'SELECT * FROM {} WHERE {}.n = 5'
                          .format(df.name, df.name))
 
-        result = selection.compute()
         expected = base_df[base_df['n'] == 5]
-
-        # Ignore Pandas index for the comparison
-        result.reset_index(drop=True, inplace=True)
-        expected.reset_index(drop=True, inplace=True)
-        pd.testing.assert_frame_equal(result, expected)
+        self.assertTableEqualsPandas(selection, expected)
 
     def test_nested_operation(self):
         base_df = pd.DataFrame([{'n': i, 's': str(i*2)} for i in range(10)])
@@ -65,13 +66,8 @@ class TestPandaSQL(unittest.TestCase):
                          'SELECT s FROM {}'.format(selection.name, df.name,
                                                    df.name, selection.name))
 
-        result = proj.compute()
         expected = base_df[base_df['n'] == 5][['s']]
-
-        # Ignore Pandas index for the comparison
-        result.reset_index(drop=True, inplace=True)
-        expected.reset_index(drop=True, inplace=True)
-        pd.testing.assert_frame_equal(result, expected)
+        self.assertTableEqualsPandas(proj, expected)
 
     def test_simple_join(self):
         base_df_1 = pd.DataFrame([{'n': i, 's1': str(i*2)} for i in range(10)])
@@ -85,13 +81,8 @@ class TestPandaSQL(unittest.TestCase):
         self.assertEqual(sql, 'SELECT * FROM {} JOIN {} USING (n)'
                          .format(df_1.name, df_2.name))
 
-        result = joined.compute()
         expected = base_df_1.merge(base_df_2, on='n')
-
-        # Ignore Pandas index for the comparison
-        result.reset_index(drop=True, inplace=True)
-        expected.reset_index(drop=True, inplace=True)
-        pd.testing.assert_frame_equal(result, expected)
+        self.assertTableEqualsPandas(joined, expected)
 
     def test_get_dependency_graph(self):
         base_df_1 = pd.DataFrame([{'n': i, 's1': str(i*2)} for i in range(10)])
@@ -139,14 +130,34 @@ class TestPandaSQL(unittest.TestCase):
                                  S2.name, S2.sql(False),
                                  S1.name, S2.name))
 
-        result = joined.compute()
         expected = base_df_1[base_df_1['n'] < 8].merge(
             base_df_2[base_df_2['n'] >= 3], on='n')
+        self.assertTableEqualsPandas(joined, expected)
 
-        # Ignore Pandas index for the comparison
-        result.reset_index(drop=True, inplace=True)
-        expected.reset_index(drop=True, inplace=True)
-        pd.testing.assert_frame_equal(result, expected)
+    def test_complex_criteria(self):
+        base_df = pd.DataFrame([{'n': i, 's': str(i*2)} for i in range(10)])
+        T = Table(base_df)
+        conj = T[(T['n'] > 2) & (T['n'] <= 6)]
+        disj = T[(T['n'] < 2) | (T['n'] >= 6)]
+        neg = T[~(T['s'] != '2')]
+
+        self.assertEqual(conj.sql(), 'SELECT * FROM {} WHERE '
+                         '{}.n > 2 AND {}.n <= 6'
+                         .format(T.name, T.name, T.name))
+        self.assertEqual(disj.sql(), 'SELECT * FROM {} WHERE '
+                         '{}.n < 2 OR {}.n >= 6'
+                         .format(T.name, T.name, T.name))
+        self.assertEqual(neg.sql(), 'SELECT * FROM {} WHERE NOT ({}.s <> 2)'
+                         .format(T.name, T.name))
+
+        conj_expected = base_df[(base_df['n'] > 2) & (base_df['n'] <= 6)]
+        self.assertTableEqualsPandas(conj, conj_expected)
+
+        disj_expected = base_df[(base_df['n'] < 2) | (base_df['n'] >= 6)]
+        self.assertTableEqualsPandas(disj, disj_expected)
+
+        neg_expected = base_df[~(base_df['s'] != '2')]
+        self.assertTableEqualsPandas(neg, neg_expected)
 
 
 if __name__ == "__main__":
