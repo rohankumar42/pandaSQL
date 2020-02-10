@@ -78,7 +78,6 @@ def _define_dependencies(table):
 
 
 class BaseThunk(object):
-    # TODO: maybe think of a better name than thunk
     def __init__(self, name=None):
         # self.name = name or uuid.uuid4().hex
         global COUNT
@@ -101,24 +100,34 @@ class BaseThunk(object):
 
 
 class Table(BaseThunk):
-    # TODO: cache computed results
-    def __init__(self, name=None):
+    def __init__(self, data=None, name=None):
         super().__init__(name=name)
         self.base_table = self
+        self.cached = False
+
+        if data is None or isinstance(data, dict) or isinstance(data, list):
+            df = pd.DataFrame(data)
+        elif isinstance(data, pd.DataFrame):
+            df = data
+        else:
+            raise TypeError('Cannot create table from object of type {}'
+                            .format(type(data)))
+
+        # Offload dataframe to SQLite
+        df.to_sql(name=self.name, con=SQL_CON)
 
     @property
     def is_base_table(self):
         return self.base_table is self
 
-    @classmethod
-    def from_pandas(cls, df: pd.DataFrame, name=None):
-        table = cls(name=name)
-        df.to_sql(name=table.name, con=SQL_CON)
-        return table
-
     def compute(self):
-        query = self.sql()
-        return pd.read_sql_query(query, con=SQL_CON)
+        # TODO: store result table in SQLite
+        if not self.cached:
+            query = self.sql(dependencies=True)
+            self.result = pd.read_sql_query(query, con=SQL_CON)
+            self.cached = True
+
+        return self.result
 
     def __getitem__(self, x):
         if isinstance(x, str) or isinstance(x, list):  # TODO: check valid cols
@@ -296,10 +305,6 @@ class Criterion(BaseThunk):
         super().__init__(name=name)
         self.operation = operation
         self.sources = [source_1, source_2]
-        # if isinstance(source_1, Projection):
-        # self.sources.append(source_1.base_table)
-        # if isinstance(source_2, Projection):
-        # self.sources.append(source_2.base_table)
 
     def __str__(self):
         source_1, source_2 = self.sources
@@ -336,7 +341,5 @@ class GreaterThanOrEqual(Criterion):
         super().__init__('>=', source_1, source_2, name=name)
 
 
-class DataFrame(object):
-
-    def __init__(self):
-        raise NotImplementedError("TODO: figure out if this is needed")
+def read_csv(csv_file, name=None):
+    return Table(pd.read_csv(csv_file), name=name)
