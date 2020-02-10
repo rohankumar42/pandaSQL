@@ -114,7 +114,8 @@ class Table(BaseThunk):
                             .format(type(data)))
 
         # Offload dataframe to SQLite
-        df.to_sql(name=self.name, con=SQL_CON)
+        if len(df) > 0:
+            df.to_sql(name=self.name, con=SQL_CON, index=False)
 
     @property
     def is_base_table(self):
@@ -146,7 +147,7 @@ class Table(BaseThunk):
             raise NotImplementedError('TODO: implement cross join')
         else:
             assert(isinstance(on, str))
-            return Join(self, other, self[on] == other[on])
+            return Join(self, other, on)
 
     def __eq__(self, other):
         return self._comparison(other, Equal)
@@ -251,17 +252,16 @@ class Selection(Table):
 
 
 class Join(Table):
-    def __init__(self, source_1, source_2, criterion, name=None):
+    def __init__(self, source_1, source_2, join_keys, name=None):
         assert(isinstance(source_1, Table))
         assert(isinstance(source_2, Table))
-        assert(isinstance(criterion, Criterion))
 
         # TODO: have well thought out type checking
 
         super().__init__(name=name)
         self.sources = [source_1, source_2]
         self.base_tables = [source_1.base_table, source_2.base_table]
-        self.criterion = criterion
+        self.join_keys = join_keys
 
     def __str__(self):
         source_1, source_2 = self.sources
@@ -276,9 +276,9 @@ class Join(Table):
             if common_table_expr is not None:
                 query.append(common_table_expr)
 
-        query.append('SELECT * FROM {} JOIN {} ON {}'
+        query.append('SELECT * FROM {} JOIN {} USING ({})'
                      .format(self.sources[0].name, self.sources[1].name,
-                             self.criterion))
+                             ','.join(self.join_keys)))
 
         return ' '.join(query)
 
@@ -342,4 +342,4 @@ class GreaterThanOrEqual(Criterion):
 
 
 def read_csv(csv_file, name=None):
-    return Table(pd.read_csv(csv_file), name=name)
+    return Table(pd.read_csv(csv_file, index=False), name=name)
