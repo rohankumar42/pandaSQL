@@ -1,65 +1,13 @@
 # import uuid
 import sqlite3
 import pandas as pd
-from queue import Queue
-from collections import defaultdict
 
-# TODO: add more supported types
-SUPPORTED_TYPES = [int, float, str]
+from pandasql.utils import _is_supported_constant, _get_dependency_graph, \
+    _topological_sort
+
 # TODO: switch to uuids when done testing
 COUNT = 0
 SQL_CON = sqlite3.connect(":memory:")
-
-
-def _is_supported_constant(x):
-    return any(isinstance(x, t) for t in SUPPORTED_TYPES)
-
-
-def _get_dependency_graph(table):
-    assert isinstance(table, Table)
-    dependencies = {}
-
-    def add_dependencies(child):
-        dependencies[child] = list(child.sources)
-        for parent in dependencies[child]:
-            if parent not in dependencies:
-                add_dependencies(parent)
-
-    add_dependencies(table)
-    return dependencies
-
-
-def _topological_sort(graph):
-    # Reversed graph: node to children that depend on it
-    parent_to_child = defaultdict(list)
-    for child, parents in graph.items():
-        for parent in parents:
-            parent_to_child[parent].append(child)
-
-    ready = Queue()  # Nodes that have 0 dependencies
-    num_deps = {node: len(deps) for (node, deps) in graph.items()}
-    for node, count in num_deps.items():
-        if count == 0:
-            ready.put(node)
-    if ready.empty():
-        raise ValueError('Cyclic dependency graph! Invalid computation.')
-
-    results = []    # All nodes in order, with dependencies before dependents
-    while not ready.empty():
-        node = ready.get()
-        results.append(node)
-
-        # Update dependency counts for all dependents of node
-        for child in parent_to_child[node]:
-            num_deps[child] -= 1
-            if num_deps[child] == 0:  # Child has no more dependencies
-                ready.put(child)
-
-    if len(results) != len(graph):
-        raise RuntimeError('Expected {} nodes but could only sort {}'
-                           .format(len(graph), len(results)))
-
-    return results
 
 
 def _define_dependencies(table):
@@ -101,7 +49,7 @@ class BaseThunk(object):
         return hash(self.name)
 
 
-class Table(BaseThunk):
+class DataFrame(BaseThunk):
     def __init__(self, data=None, name=None):
         super().__init__(name=name)
         self.base_table = self
@@ -148,7 +96,7 @@ class Table(BaseThunk):
 
     def join(self, other, on=None, **args):
         """TODO: support other pandas join arguments"""
-        assert(isinstance(other, Table))
+        assert(isinstance(other, DataFrame))
         if on is None:
             raise NotImplementedError('TODO: implement cross join')
         else:
@@ -190,9 +138,9 @@ class Table(BaseThunk):
             raise TypeError('Only constants and Projections are accepted')
 
 
-class Projection(Table):
+class Projection(DataFrame):
     def __init__(self, source, col, name=None):
-        assert(isinstance(source, Table))
+        assert(isinstance(source, DataFrame))
 
         if isinstance(col, str):
             cols = [col]
@@ -228,9 +176,9 @@ class Projection(Table):
         return ' '.join(query)
 
 
-class Selection(Table):
+class Selection(DataFrame):
     def __init__(self, source, criterion, name=None):
-        assert(isinstance(source, Table))
+        assert(isinstance(source, DataFrame))
         assert(isinstance(criterion, Criterion))
 
         # TODO: have well thought out type checking
@@ -257,10 +205,10 @@ class Selection(Table):
         return ' '.join(query)
 
 
-class Join(Table):
+class Join(DataFrame):
     def __init__(self, source_1, source_2, join_keys, name=None):
-        assert(isinstance(source_1, Table))
-        assert(isinstance(source_2, Table))
+        assert(isinstance(source_1, DataFrame))
+        assert(isinstance(source_2, DataFrame))
 
         # TODO: have well thought out type checking
 
@@ -289,9 +237,9 @@ class Join(Table):
         return ' '.join(query)
 
 
-class Limit(Table):
+class Limit(DataFrame):
     def __init__(self, source, n, name=None):
-        assert(isinstance(source, Table))
+        assert(isinstance(source, DataFrame))
 
         super().__init__(name=name)
         self.sources = [source]
@@ -408,4 +356,4 @@ class Not(Criterion):
 
 
 def read_csv(csv_file, name=None):
-    return Table(pd.read_csv(csv_file, index=False), name=name)
+    return DataFrame(pd.read_csv(csv_file, index=False), name=name)
