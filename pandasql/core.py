@@ -52,31 +52,47 @@ class BaseThunk(object):
 class DataFrame(BaseThunk):
     def __init__(self, data=None, name=None):
         super().__init__(name=name)
-        self.base_table = self
-        self.cached = False
+        self.base_tables = [self]
+        self.result = None
+        self.df = None
 
-        if data is None or isinstance(data, dict) or isinstance(data, list):
-            df = pd.DataFrame(data)
+        if isinstance(data, dict) or isinstance(data, list):
+            self.df = pd.DataFrame(data)
         elif isinstance(data, pd.DataFrame):
-            df = data
+            self.df = data
+        elif data is None:
+            pass
         else:
             raise TypeError('Cannot create table from object of type {}'
                             .format(type(data)))
 
         # Offload dataframe to SQLite
-        if len(df) > 0:
-            df.to_sql(name=self.name, con=SQL_CON, index=False)
+        if self.df is not None and len(self.df) > 0:
+            self.df.to_sql(name=self.name, con=SQL_CON, index=False)
 
     @property
     def is_base_table(self):
-        return self.base_table is self
+        return len(self.base_tables) == 1 and self.base_tables[0] is self
+
+    def require_result(func):
+        '''Decorator for functions that require results to be ready'''
+
+        def result_ensured(self, *args, **kwargs):
+            self.compute()
+            return func(self, *args, **kwargs)
+
+        return result_ensured
 
     def compute(self):
         # TODO: store result table in SQLite
-        if not self.cached:
-            query = self.sql(dependencies=True)
-            self.result = pd.read_sql_query(query, con=SQL_CON)
-            self.cached = True
+
+        if self.result is None:
+            if self.is_base_table:
+                assert self.df is not None, "Base tables should have df"
+                self.result = self.df
+            else:
+                query = self.sql(dependencies=True)
+                self.result = pd.read_sql_query(query, con=SQL_CON)
 
         return self.result
 
@@ -93,6 +109,10 @@ class DataFrame(BaseThunk):
             return self if x.stop is None else Limit(self, n=x.stop)
         else:
             raise TypeError('Unsupported indexing type {}'.format(type(x)))
+
+    @require_result
+    def __len__(self):
+        return len(self.result)
 
     def join(self, other, on=None, **args):
         """TODO: support other pandas join arguments"""
@@ -152,15 +172,11 @@ class Projection(DataFrame):
 
         super().__init__(name=name)
         self.sources = [source]
-        self.base_table = source.base_table
+        self.base_tables = source.base_tables
         self.cols = cols
 
     def __str__(self):
-        attrs = ', '.join('{}.{}'.format(self.sources[0].name, col)
-                          for col in self.cols)
-        if len(self.cols) > 1:
-            attrs = '({})'.format(attrs)
-        return attrs
+        raise NotImplementedError("TODO: implicitly compute upon actions")
 
     def sql(self, dependencies=True):
         query = []
@@ -185,7 +201,7 @@ class Selection(DataFrame):
 
         super().__init__(name=name)
         self.sources = [source]
-        self.base_table = source.base_table
+        self.base_tables = source.base_tables
         self.criterion = criterion
 
     def __str__(self):
@@ -214,7 +230,7 @@ class Join(DataFrame):
 
         super().__init__(name=name)
         self.sources = [source_1, source_2]
-        self.base_tables = [source_1.base_table, source_2.base_table]
+        self.base_tables = source_1.base_tables + source_2.base_tables
         self.join_keys = join_keys
 
     def __str__(self):
@@ -243,7 +259,7 @@ class Limit(DataFrame):
 
         super().__init__(name=name)
         self.sources = [source]
-        self.base_table = source.base_table
+        self.base_tables = source.base_tables
         self.n = n
 
     def sql(self, dependencies=True):
@@ -275,6 +291,8 @@ class Constant(BaseThunk):
 class Criterion(BaseThunk):
     def __init__(self, operation, source_1, source_2=None,
                  name=None, simple=True):
+        # Simple criteria depend on comparisons between columns and/or
+        # constants, whereas compound criteria depend on smaller criteria
         if simple:
             assert(isinstance(source_1, Projection) or
                    isinstance(source_1, Constant))
@@ -294,8 +312,9 @@ class Criterion(BaseThunk):
 
     def __str__(self):
         '''Default for binary Criterion objects'''
-        source_1, source_2 = self.sources
-        return '{} {} {}'.format(source_1, self.operation, source_2)
+        return '{} {} {}'.format(self._source_to_str(self.sources[0]),
+                                 self.operation,
+                                 self._source_to_str(self.sources[1]))
 
     def __and__(self, other):
         return And(self, other)
@@ -305,6 +324,21 @@ class Criterion(BaseThunk):
 
     def __invert__(self):
         return Not(self)
+
+    @staticmethod
+    def _source_to_str(source):
+        if isinstance(source, Projection):
+            attrs = ', '.join('{}.{}'.format(source.sources[0].name, col)
+                              for col in source.cols)
+            if len(source.cols) > 1:
+                attrs = '({})'.format(attrs)
+            return attrs
+
+        elif isinstance(source, Constant) or isinstance(source, Criterion):
+            return str(source)
+
+        else:
+            raise TypeError("Unexpected source type {}".format(type(source)))
 
 
 class Equal(Criterion):

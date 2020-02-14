@@ -152,6 +152,13 @@ class TestDataFrame(unittest.TestCase):
         neg_expected = base_df[~(base_df['s'] != '2')]
         self.assertDataFrameEqualsPandas(neg, neg_expected)
 
+    def test_implicit_compute_on_len(self):
+        T = ps.DataFrame([{'n': i, 's': str(i*2)} for i in range(10)])
+        self.assertIsNone(T.result, None)
+        T_len = len(T)
+        self.assertIsInstance(T.result, pd.DataFrame)
+        self.assertEqual(T_len, 10)
+
 
 if __name__ == "__main__":
     unittest.main()
