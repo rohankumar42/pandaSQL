@@ -154,10 +154,11 @@ class TestDataFrame(unittest.TestCase):
 
     def test_implicit_compute_on_len(self):
         T = ps.DataFrame([{'n': i, 's': str(i*2)} for i in range(10)])
-        self.assertIsNone(T.result, None)
-        T_len = len(T)
-        self.assertIsInstance(T.result, pd.DataFrame)
-        self.assertEqual(T_len, 10)
+        selection = T[T['n'] < 5]
+        self.assertIsNone(selection.result)
+        n = len(selection)
+        self.assertIsInstance(selection.result, pd.DataFrame)
+        self.assertEqual(n, 5)
 
 
 if __name__ == "__main__":

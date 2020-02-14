@@ -10,23 +10,6 @@ COUNT = 0
 SQL_CON = sqlite3.connect(":memory:")
 
 
-def _define_dependencies(table):
-    graph = _get_dependency_graph(table)
-    ordered_deps = _topological_sort(graph)
-
-    # TODO: instead of omitting base tables, omit all tables that are already
-    # in SQL (after storing computed results in SQLite is implemented)
-    common_table_exprs = [
-        '{} AS ({})'.format(t.name, t.sql(dependencies=False))
-        for t in ordered_deps if not t.is_base_table and t is not table
-    ]
-
-    if len(common_table_exprs) > 0:
-        return 'WITH ' + ', '.join(common_table_exprs)
-    else:
-        return None
-
-
 class BaseThunk(object):
     def __init__(self, name=None):
         # self.name = name or uuid.uuid4().hex
@@ -50,16 +33,20 @@ class BaseThunk(object):
 
 
 class DataFrame(BaseThunk):
-    def __init__(self, data=None, name=None):
+    def __init__(self, data=None, name=None, sources=None, base_tables=None):
         super().__init__(name=name)
-        self.base_tables = [self]
+        self.sources = sources or []
+        self.base_tables = base_tables or [self]
         self.result = None
-        self.df = None
+        df = None
 
+        # If data provided, result is already ready
         if isinstance(data, dict) or isinstance(data, list):
-            self.df = pd.DataFrame(data)
+            df = pd.DataFrame(data)
+            self.result = df
         elif isinstance(data, pd.DataFrame):
-            self.df = data
+            df = data
+            self.result = df
         elif data is None:
             pass
         else:
@@ -67,8 +54,8 @@ class DataFrame(BaseThunk):
                             .format(type(data)))
 
         # Offload dataframe to SQLite
-        if self.df is not None and len(self.df) > 0:
-            self.df.to_sql(name=self.name, con=SQL_CON, index=False)
+        if df is not None and len(df) > 0:
+            df.to_sql(name=self.name, con=SQL_CON, index=False)
 
     @property
     def is_base_table(self):
@@ -87,12 +74,8 @@ class DataFrame(BaseThunk):
         # TODO: store result table in SQLite
 
         if self.result is None:
-            if self.is_base_table:
-                assert self.df is not None, "Base tables should have df"
-                self.result = self.df
-            else:
-                query = self.sql(dependencies=True)
-                self.result = pd.read_sql_query(query, con=SQL_CON)
+            query = self.sql(dependencies=True)
+            self.result = pd.read_sql_query(query, con=SQL_CON)
 
         return self.result
 
@@ -170,9 +153,8 @@ class Projection(DataFrame):
             raise TypeError('col must be of type str or list, but found {}'
                             .format(type(col)))
 
-        super().__init__(name=name)
-        self.sources = [source]
-        self.base_tables = source.base_tables
+        super().__init__(name=name, sources=[source],
+                         base_tables=source.base_tables)
         self.cols = cols
 
     def __str__(self):
@@ -199,9 +181,8 @@ class Selection(DataFrame):
 
         # TODO: have well thought out type checking
 
-        super().__init__(name=name)
-        self.sources = [source]
-        self.base_tables = source.base_tables
+        super().__init__(name=name, sources=[source],
+                         base_tables=source.base_tables)
         self.criterion = criterion
 
     def __str__(self):
@@ -228,9 +209,9 @@ class Join(DataFrame):
 
         # TODO: have well thought out type checking
 
-        super().__init__(name=name)
-        self.sources = [source_1, source_2]
-        self.base_tables = source_1.base_tables + source_2.base_tables
+        super().__init__(name=name, sources=[source_1, source_2],
+                         base_tables=source_1.base_tables +
+                         source_2.base_tables)
         self.join_keys = join_keys
 
     def __str__(self):
@@ -257,9 +238,8 @@ class Limit(DataFrame):
     def __init__(self, source, n, name=None):
         assert(isinstance(source, DataFrame))
 
-        super().__init__(name=name)
-        self.sources = [source]
-        self.base_tables = source.base_tables
+        super().__init__(name=name, sources=[source],
+                         base_tables=source.base_tables)
         self.n = n
 
     def sql(self, dependencies=True):
@@ -391,3 +371,20 @@ class Not(Criterion):
 
 def read_csv(csv_file, name=None):
     return DataFrame(pd.read_csv(csv_file, index=False), name=name)
+
+
+def _define_dependencies(table: DataFrame):
+    graph = _get_dependency_graph(table)
+    ordered_deps = _topological_sort(graph)
+
+    # TODO: instead of omitting base tables, omit all tables that are already
+    # in SQL (after storing computed results in SQLite is implemented)
+    common_table_exprs = [
+        '{} AS ({})'.format(t.name, t.sql(dependencies=False))
+        for t in ordered_deps if not t.is_base_table and t is not table
+    ]
+
+    if len(common_table_exprs) > 0:
+        return 'WITH ' + ', '.join(common_table_exprs)
+    else:
+        return None
