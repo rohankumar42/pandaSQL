@@ -160,6 +160,14 @@ class TestDataFrame(unittest.TestCase):
         self.assertIsInstance(selection.result, pd.DataFrame)
         self.assertEqual(n, 5)
 
+    def test_implicit_compute_on_str(self):
+        T = ps.DataFrame([{'n': i, 's': str(i*2)} for i in range(10)])
+        selection = T[T['n'] < 5]
+        self.assertIsNone(selection.result)
+        out = str(selection)
+        self.assertIsInstance(selection.result, pd.DataFrame)
+        self.assertEqual(out, str(selection.result))
+
 
 if __name__ == "__main__":
     unittest.main()

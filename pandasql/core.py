@@ -94,6 +94,10 @@ class DataFrame(BaseThunk):
             raise TypeError('Unsupported indexing type {}'.format(type(x)))
 
     @require_result
+    def __str__(self):
+        return str(self.result)
+
+    @require_result
     def __len__(self):
         return len(self.result)
 
@@ -157,9 +161,6 @@ class Projection(DataFrame):
                          base_tables=source.base_tables)
         self.cols = cols
 
-    def __str__(self):
-        raise NotImplementedError("TODO: implicitly compute upon actions")
-
     def sql(self, dependencies=True):
         query = []
 
@@ -184,9 +185,6 @@ class Selection(DataFrame):
         super().__init__(name=name, sources=[source],
                          base_tables=source.base_tables)
         self.criterion = criterion
-
-    def __str__(self):
-        return 'Select({}, {})'.format(self.sources[0], self.criterion)
 
     def sql(self, dependencies=True):
         query = []
@@ -213,11 +211,6 @@ class Join(DataFrame):
                          base_tables=source_1.base_tables +
                          source_2.base_tables)
         self.join_keys = join_keys
-
-    def __str__(self):
-        source_1, source_2 = self.sources
-        return 'Join({}, {}, {})'.format(source_1, source_2,
-                                         self.criterion)
 
     def sql(self, dependencies=True):
         query = []
