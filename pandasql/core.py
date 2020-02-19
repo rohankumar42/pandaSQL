@@ -71,11 +71,12 @@ class DataFrame(BaseThunk):
         return result_ensured
 
     def compute(self):
-        # TODO: store result table in SQLite
 
         if self.result is None:
             query = self.sql(dependencies=True)
             self.result = pd.read_sql_query(query, con=SQL_CON)
+            # TODO: directly save results in SQLite instead
+            self.result.to_sql(name=self.name, con=SQL_CON, index=False)
 
         return self.result
 
@@ -84,8 +85,6 @@ class DataFrame(BaseThunk):
             return Projection(self, x)
         elif isinstance(x, Criterion):
             return Selection(self, x)
-        elif isinstance(x, int):
-            raise NotImplementedError('TODO: iloc/loc based access')
         elif isinstance(x, slice):
             if x.start is not None or x.step is not None:
                 raise ValueError('Only slices of the form df[:n] are accepted')
@@ -210,6 +209,8 @@ class Join(DataFrame):
         super().__init__(name=name, sources=[source_1, source_2],
                          base_tables=source_1.base_tables +
                          source_2.base_tables)
+        if isinstance(join_keys, str):
+            join_keys = [join_keys]
         self.join_keys = join_keys
 
     def sql(self, dependencies=True):
@@ -370,11 +371,10 @@ def _define_dependencies(table: DataFrame):
     graph = _get_dependency_graph(table)
     ordered_deps = _topological_sort(graph)
 
-    # TODO: instead of omitting base tables, omit all tables that are already
-    # in SQL (after storing computed results in SQLite is implemented)
     common_table_exprs = [
         '{} AS ({})'.format(t.name, t.sql(dependencies=False))
-        for t in ordered_deps if not t.is_base_table and t is not table
+        for t in ordered_deps
+        if not t.is_base_table and t is not table and t.result is None
     ]
 
     if len(common_table_exprs) > 0:

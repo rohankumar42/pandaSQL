@@ -161,12 +161,35 @@ class TestDataFrame(unittest.TestCase):
         self.assertEqual(n, 5)
 
     def test_implicit_compute_on_str(self):
-        T = ps.DataFrame([{'n': i, 's': str(i*2)} for i in range(10)])
+        df = pd.DataFrame([{'n': i, 's': str(i*2)} for i in range(10)])
+        T = ps.DataFrame(df)
         selection = T[T['n'] < 5]
         self.assertIsNone(selection.result)
         out = str(selection)
         self.assertIsInstance(selection.result, pd.DataFrame)
-        self.assertEqual(out, str(selection.result))
+        self.assertEqual(out, str(df[df['n'] < 5]))
+
+    def test_caching_in_sqlite(self):
+        base_df_1 = pd.DataFrame([{'n': i, 's1': str(i*2)} for i in range(10)])
+        base_df_2 = pd.DataFrame([{'n': i, 's2': str(i*2)} for i in range(10)])
+        T1 = ps.DataFrame(base_df_1)
+        T2 = ps.DataFrame(base_df_2)
+        S1 = T1[T1['n'] < 8]
+        S2 = T2[T2['n'] >= 3]
+        joined = S1.join(S2, on='n')
+
+        # Compute S1, so its result is cached in SQLite
+        S1.compute()
+
+        # Now, the query for joined should not declare S1 again
+        self.assertEqual(joined.sql(), 'WITH {} AS ({}) '
+                         'SELECT * FROM {} JOIN {} USING (n)'
+                         .format(S2.name, S2.sql(False),
+                                 S1.name, S2.name))
+
+        expected = base_df_1[base_df_1['n'] < 8].merge(
+            base_df_2[base_df_2['n'] >= 3], on='n')
+        self.assertDataFrameEqualsPandas(joined, expected)
 
 
 if __name__ == "__main__":
