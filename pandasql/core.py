@@ -145,6 +145,21 @@ class DataFrame(BaseThunk):
 
         return self.result
 
+    def _create_sql_query(self):
+        raise NotImplementedError("DataFrame objects don't need a SQL query")
+
+    def sql(self, dependencies=True):
+        query = []
+
+        if dependencies:
+            common_table_expr = _define_dependencies(self)
+            if common_table_expr is not None:
+                query.append(common_table_expr)
+
+        query.append(self._create_sql_query())
+
+        return ' '.join(query)
+
     def __getitem__(self, x):
         if isinstance(x, str) or isinstance(x, list):  # TODO: check valid cols
             return Projection(self, x)
@@ -156,6 +171,9 @@ class DataFrame(BaseThunk):
             return self if x.stop is None else Limit(self, n=x.stop)
         else:
             raise TypeError('Unsupported indexing type {}'.format(type(x)))
+
+    def head(self, n=5):
+        return self[:n]
 
     @require_result
     def __str__(self):
@@ -227,18 +245,9 @@ class Projection(DataFrame):
                          base_tables=source.base_tables)
         self.cols = cols
 
-    def sql(self, dependencies=True):
-        query = []
-
-        if dependencies:
-            common_table_expr = _define_dependencies(self)
-            if common_table_expr is not None:
-                query.append(common_table_expr)
-
-        query.append('SELECT {} FROM {}'.format(', '.join(self.cols),
-                                                self.sources[0].name))
-
-        return ' '.join(query)
+    def _create_sql_query(self):
+        return 'SELECT {} FROM {}'.format(', '.join(self.cols),
+                                          self.sources[0].name)
 
 
 class Selection(DataFrame):
@@ -252,18 +261,9 @@ class Selection(DataFrame):
                          base_tables=source.base_tables)
         self.criterion = criterion
 
-    def sql(self, dependencies=True):
-        query = []
-
-        if dependencies:
-            common_table_expr = _define_dependencies(self)
-            if common_table_expr is not None:
-                query.append(common_table_expr)
-
-        query.append('SELECT * FROM {} WHERE {}'.format(self.sources[0].name,
-                                                        self.criterion))
-
-        return ' '.join(query)
+    def _create_sql_query(self):
+        return 'SELECT * FROM {} WHERE {}'.format(self.sources[0].name,
+                                                  self.criterion)
 
 
 class OrderBy(DataFrame):
@@ -283,24 +283,15 @@ class OrderBy(DataFrame):
         self.cols = cols
         self.ascending = ascending
 
-    def sql(self, dependencies=True):
-        query = []
-
-        if dependencies:
-            common_table_expr = _define_dependencies(self)
-            if common_table_expr is not None:
-                query.append(common_table_expr)
-
+    def _create_sql_query(self):
         order_by = [
             '{}.{} {}'.format(self.sources[0].name, col,
                               'ASC' if asc else 'DESC')
             for col, asc in zip(self.cols, self.ascending)
         ]
 
-        query.append('SELECT * FROM {} ORDER BY {}'
-                     .format(self.sources[0].name, ', '.join(order_by)))
-
-        return ' '.join(query)
+        return 'SELECT * FROM {} ORDER BY {}' \
+            .format(self.sources[0].name, ', '.join(order_by))
 
 
 class Join(DataFrame):
@@ -315,19 +306,10 @@ class Join(DataFrame):
             join_keys = [join_keys]
         self.join_keys = join_keys
 
-    def sql(self, dependencies=True):
-        query = []
-
-        if dependencies:
-            common_table_expr = _define_dependencies(self)
-            if common_table_expr is not None:
-                query.append(common_table_expr)
-
-        query.append('SELECT * FROM {} JOIN {} USING ({})'
-                     .format(self.sources[0].name, self.sources[1].name,
-                             ','.join(self.join_keys)))
-
-        return ' '.join(query)
+    def _create_sql_query(self):
+        return 'SELECT * FROM {} JOIN {} USING ({})' \
+            .format(self.sources[0].name, self.sources[1].name,
+                    ','.join(self.join_keys))
 
 
 class Limit(DataFrame):
@@ -337,18 +319,8 @@ class Limit(DataFrame):
                          base_tables=source.base_tables)
         self.n = n
 
-    def sql(self, dependencies=True):
-        query = []
-
-        if dependencies:
-            common_table_expr = _define_dependencies(self)
-            if common_table_expr is not None:
-                query.append(common_table_expr)
-
-        query.append('SELECT * FROM {} LIMIT {}'
-                     .format(self.sources[0].name, self.n))
-
-        return ' '.join(query)
+    def _create_sql_query(self):
+        return 'SELECT * FROM {} LIMIT {}'.format(self.sources[0].name, self.n)
 
 
 class Equal(Criterion):
@@ -403,14 +375,14 @@ def read_csv(csv_file, name=None):
     return DataFrame(pd.read_csv(csv_file, index=False), name=name)
 
 
-def _define_dependencies(table: DataFrame):
-    graph = _get_dependency_graph(table)
+def _define_dependencies(df: DataFrame):
+    graph = _get_dependency_graph(df)
     ordered_deps = _topological_sort(graph)
 
     common_table_exprs = [
         '{} AS ({})'.format(t.name, t.sql(dependencies=False))
         for t in ordered_deps
-        if not t.is_base_table and t is not table and t.result is None
+        if not t.is_base_table and t is not df and t.result is None
     ]
 
     if len(common_table_exprs) > 0:
