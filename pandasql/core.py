@@ -32,224 +32,6 @@ class BaseThunk(object):
         return hash(self.name)
 
 
-class DataFrame(BaseThunk):
-    def __init__(self, data=None, name=None, sources=None, base_tables=None):
-        super().__init__(name=name)
-        self.sources = sources or []
-        self.base_tables = base_tables or [self]
-        self.result = None
-        df = None
-
-        # If data provided, result is already ready
-        if isinstance(data, dict) or isinstance(data, list):
-            df = pd.DataFrame(data)
-            self.result = df
-        elif isinstance(data, pd.DataFrame):
-            df = data
-            self.result = df
-        elif data is None:
-            pass
-        else:
-            raise TypeError('Cannot create table from object of type {}'
-                            .format(type(data)))
-
-        # Offload dataframe to SQLite
-        if df is not None and len(df) > 0:
-            df.to_sql(name=self.name, con=SQL_CON, index=False)
-
-    @property
-    def is_base_table(self):
-        return len(self.base_tables) == 1 and self.base_tables[0] is self
-
-    def require_result(func):
-        '''Decorator for functions that require results to be ready'''
-
-        def result_ensured(self, *args, **kwargs):
-            self.compute()
-            return func(self, *args, **kwargs)
-
-        return result_ensured
-
-    def compute(self):
-
-        if self.result is None:
-            query = self.sql(dependencies=True)
-            self.result = pd.read_sql_query(query, con=SQL_CON)
-            # TODO: directly save results in SQLite instead
-            self.result.to_sql(name=self.name, con=SQL_CON, index=False)
-
-        return self.result
-
-    def __getitem__(self, x):
-        if isinstance(x, str) or isinstance(x, list):  # TODO: check valid cols
-            return Projection(self, x)
-        elif isinstance(x, Criterion):
-            return Selection(self, x)
-        elif isinstance(x, slice):
-            if x.start is not None or x.step is not None:
-                raise ValueError('Only slices of the form df[:n] are accepted')
-            return self if x.stop is None else Limit(self, n=x.stop)
-        else:
-            raise TypeError('Unsupported indexing type {}'.format(type(x)))
-
-    @require_result
-    def __str__(self):
-        return str(self.result)
-
-    @require_result
-    def __len__(self):
-        return len(self.result)
-
-    def join(self, other, on=None, **args):
-        """TODO: support other pandas join arguments"""
-        assert(isinstance(other, DataFrame))
-        if on is None:
-            raise NotImplementedError('TODO: implement cross join')
-        else:
-            assert(isinstance(on, str))
-            return Join(self, other, on)
-
-    def __eq__(self, other):
-        return self._comparison(other, Equal)
-
-    def __ne__(self, other):
-        return self._comparison(other, NotEqual)
-
-    def __lt__(self, other):
-        return self._comparison(other, LessThan)
-
-    def __le__(self, other):
-        return self._comparison(other, LessThanOrEqual)
-
-    def __gt__(self, other):
-        return self._comparison(other, GreaterThan)
-
-    def __ge__(self, other):
-        return self._comparison(other, GreaterThanOrEqual)
-
-    def _comparison(self, other, how_class):
-        return how_class(self._make_projection_or_constant(self),
-                         self._make_projection_or_constant(other))
-
-    def __hash__(self):
-        return super().__hash__()
-
-    @staticmethod
-    def _make_projection_or_constant(x):
-        if isinstance(x, Projection):
-            return x
-        elif _is_supported_constant(x):
-            return Constant(x)
-        else:
-            raise TypeError('Only constants and Projections are accepted')
-
-
-class Projection(DataFrame):
-    def __init__(self, source, col, name=None):
-        assert(isinstance(source, DataFrame))
-
-        if isinstance(col, str):
-            cols = [col]
-        elif isinstance(col, list):
-            cols = col
-        else:
-            raise TypeError('col must be of type str or list, but found {}'
-                            .format(type(col)))
-
-        super().__init__(name=name, sources=[source],
-                         base_tables=source.base_tables)
-        self.cols = cols
-
-    def sql(self, dependencies=True):
-        query = []
-
-        if dependencies:
-            common_table_expr = _define_dependencies(self)
-            if common_table_expr is not None:
-                query.append(common_table_expr)
-
-        query.append('SELECT {} FROM {}'.format(', '.join(self.cols),
-                                                self.sources[0].name))
-
-        return ' '.join(query)
-
-
-class Selection(DataFrame):
-    def __init__(self, source, criterion, name=None):
-        assert(isinstance(source, DataFrame))
-        assert(isinstance(criterion, Criterion))
-
-        # TODO: have well thought out type checking
-
-        super().__init__(name=name, sources=[source],
-                         base_tables=source.base_tables)
-        self.criterion = criterion
-
-    def sql(self, dependencies=True):
-        query = []
-
-        if dependencies:
-            common_table_expr = _define_dependencies(self)
-            if common_table_expr is not None:
-                query.append(common_table_expr)
-
-        query.append('SELECT * FROM {} WHERE {}'.format(self.sources[0].name,
-                                                        self.criterion))
-
-        return ' '.join(query)
-
-
-class Join(DataFrame):
-    def __init__(self, source_1, source_2, join_keys, name=None):
-        assert(isinstance(source_1, DataFrame))
-        assert(isinstance(source_2, DataFrame))
-
-        # TODO: have well thought out type checking
-
-        super().__init__(name=name, sources=[source_1, source_2],
-                         base_tables=source_1.base_tables +
-                         source_2.base_tables)
-        if isinstance(join_keys, str):
-            join_keys = [join_keys]
-        self.join_keys = join_keys
-
-    def sql(self, dependencies=True):
-        query = []
-
-        if dependencies:
-            common_table_expr = _define_dependencies(self)
-            if common_table_expr is not None:
-                query.append(common_table_expr)
-
-        query.append('SELECT * FROM {} JOIN {} USING ({})'
-                     .format(self.sources[0].name, self.sources[1].name,
-                             ','.join(self.join_keys)))
-
-        return ' '.join(query)
-
-
-class Limit(DataFrame):
-    def __init__(self, source, n, name=None):
-        assert(isinstance(source, DataFrame))
-
-        super().__init__(name=name, sources=[source],
-                         base_tables=source.base_tables)
-        self.n = n
-
-    def sql(self, dependencies=True):
-        query = []
-
-        if dependencies:
-            common_table_expr = _define_dependencies(self)
-            if common_table_expr is not None:
-                query.append(common_table_expr)
-
-        query.append('SELECT * FROM {} LIMIT {}'
-                     .format(self.sources[0].name, self.n))
-
-        return ' '.join(query)
-
-
 class Constant(BaseThunk):
 
     def __init__(self, value, name=None):
@@ -313,6 +95,260 @@ class Criterion(BaseThunk):
 
         else:
             raise TypeError("Unexpected source type {}".format(type(source)))
+
+
+class DataFrame(BaseThunk):
+    def __init__(self, data=None, name=None, sources=None, base_tables=None):
+        super().__init__(name=name)
+        self.sources = sources or []
+        self.base_tables = base_tables or [self]
+        self.result = None
+        df = None
+
+        # If data provided, result is already ready
+        if isinstance(data, dict) or isinstance(data, list):
+            df = pd.DataFrame(data)
+            self.result = df
+        elif isinstance(data, pd.DataFrame):
+            df = data
+            self.result = df
+        elif data is None:
+            pass
+        else:
+            raise TypeError('Cannot create table from object of type {}'
+                            .format(type(data)))
+
+        # Offload dataframe to SQLite
+        if df is not None and len(df) > 0:
+            df.to_sql(name=self.name, con=SQL_CON, index=False)
+
+    @property
+    def is_base_table(self):
+        return len(self.base_tables) == 1 and self.base_tables[0] is self
+
+    def require_result(func):  # noqa
+        '''Decorator for functions that require results to be ready'''
+
+        def result_ensured(self, *args, **kwargs):
+            self.compute()
+            return func(self, *args, **kwargs)
+
+        return result_ensured
+
+    def compute(self):
+
+        if self.result is None:
+            query = self.sql(dependencies=True)
+            self.result = pd.read_sql_query(query, con=SQL_CON)
+            # TODO: directly save results in SQLite instead
+            self.result.to_sql(name=self.name, con=SQL_CON, index=False)
+
+        return self.result
+
+    def __getitem__(self, x):
+        if isinstance(x, str) or isinstance(x, list):  # TODO: check valid cols
+            return Projection(self, x)
+        elif isinstance(x, Criterion):
+            return Selection(self, x)
+        elif isinstance(x, slice):
+            if x.start is not None or x.step is not None:
+                raise ValueError('Only slices of the form df[:n] are accepted')
+            return self if x.stop is None else Limit(self, n=x.stop)
+        else:
+            raise TypeError('Unsupported indexing type {}'.format(type(x)))
+
+    @require_result
+    def __str__(self):
+        return str(self.result)
+
+    @require_result
+    def __len__(self):
+        return len(self.result)
+
+    def sort_values(self, by, ascending=True):
+        return OrderBy(self, cols=by, ascending=ascending)
+
+    def join(self, other, on=None, **args):
+        """TODO: support other pandas join arguments"""
+        assert(isinstance(other, DataFrame))
+        if on is None:
+            raise NotImplementedError('TODO: implement cross join')
+        else:
+            assert(isinstance(on, str))
+            return Join(self, other, on)
+
+    def __eq__(self, other):
+        return self._comparison(other, Equal)
+
+    def __ne__(self, other):
+        return self._comparison(other, NotEqual)
+
+    def __lt__(self, other):
+        return self._comparison(other, LessThan)
+
+    def __le__(self, other):
+        return self._comparison(other, LessThanOrEqual)
+
+    def __gt__(self, other):
+        return self._comparison(other, GreaterThan)
+
+    def __ge__(self, other):
+        return self._comparison(other, GreaterThanOrEqual)
+
+    def _comparison(self, other, how_class):
+        return how_class(self._make_projection_or_constant(self),
+                         self._make_projection_or_constant(other))
+
+    def __hash__(self):
+        return super().__hash__()
+
+    @staticmethod
+    def _make_projection_or_constant(x):
+        if isinstance(x, Projection):
+            return x
+        elif _is_supported_constant(x):
+            return Constant(x)
+        else:
+            raise TypeError('Only constants and Projections are accepted')
+
+
+class Projection(DataFrame):
+    def __init__(self, source: DataFrame, col, name=None):
+
+        if isinstance(col, str):
+            cols = [col]
+        elif isinstance(col, list):
+            cols = col
+        else:
+            raise TypeError('col must be of type str or list, but found {}'
+                            .format(type(col)))
+
+        super().__init__(name=name, sources=[source],
+                         base_tables=source.base_tables)
+        self.cols = cols
+
+    def sql(self, dependencies=True):
+        query = []
+
+        if dependencies:
+            common_table_expr = _define_dependencies(self)
+            if common_table_expr is not None:
+                query.append(common_table_expr)
+
+        query.append('SELECT {} FROM {}'.format(', '.join(self.cols),
+                                                self.sources[0].name))
+
+        return ' '.join(query)
+
+
+class Selection(DataFrame):
+    def __init__(self, source: DataFrame, criterion: Criterion, name=None):
+        assert(isinstance(source, DataFrame))
+        assert(isinstance(criterion, Criterion))
+
+        # TODO: have well thought out type checking
+
+        super().__init__(name=name, sources=[source],
+                         base_tables=source.base_tables)
+        self.criterion = criterion
+
+    def sql(self, dependencies=True):
+        query = []
+
+        if dependencies:
+            common_table_expr = _define_dependencies(self)
+            if common_table_expr is not None:
+                query.append(common_table_expr)
+
+        query.append('SELECT * FROM {} WHERE {}'.format(self.sources[0].name,
+                                                        self.criterion))
+
+        return ' '.join(query)
+
+
+class OrderBy(DataFrame):
+    def __init__(self, source: DataFrame, cols, ascending=True, name=None):
+
+        super().__init__(name=name, sources=[source],
+                         base_tables=source.base_tables)
+        if isinstance(cols, str):
+            cols = [cols]
+        if isinstance(ascending, bool):
+            ascending = [ascending]
+        if len(cols) != len(ascending):
+            raise ValueError("cols and ascending must be equal lengths, "
+                             "but found len(cols)={} and len(ascending)={}"
+                             .format(len(cols), len(ascending)))
+
+        self.cols = cols
+        self.ascending = ascending
+
+    def sql(self, dependencies=True):
+        query = []
+
+        if dependencies:
+            common_table_expr = _define_dependencies(self)
+            if common_table_expr is not None:
+                query.append(common_table_expr)
+
+        order_by = [
+            '{}.{} {}'.format(self.sources[0].name, col,
+                              'ASC' if asc else 'DESC')
+            for col, asc in zip(self.cols, self.ascending)
+        ]
+
+        query.append('SELECT * FROM {} ORDER BY {}'
+                     .format(self.sources[0].name, ', '.join(order_by)))
+
+        return ' '.join(query)
+
+
+class Join(DataFrame):
+    def __init__(self, source_1: DataFrame, source_2: DataFrame,
+                 join_keys, name=None):
+        # TODO: have well thought out type checking
+
+        super().__init__(name=name, sources=[source_1, source_2],
+                         base_tables=source_1.base_tables +
+                         source_2.base_tables)
+        if isinstance(join_keys, str):
+            join_keys = [join_keys]
+        self.join_keys = join_keys
+
+    def sql(self, dependencies=True):
+        query = []
+
+        if dependencies:
+            common_table_expr = _define_dependencies(self)
+            if common_table_expr is not None:
+                query.append(common_table_expr)
+
+        query.append('SELECT * FROM {} JOIN {} USING ({})'
+                     .format(self.sources[0].name, self.sources[1].name,
+                             ','.join(self.join_keys)))
+
+        return ' '.join(query)
+
+
+class Limit(DataFrame):
+    def __init__(self, source: DataFrame, n, name=None):
+
+        super().__init__(name=name, sources=[source],
+                         base_tables=source.base_tables)
+        self.n = n
+
+    def sql(self, dependencies=True):
+        query = []
+
+        if dependencies:
+            common_table_expr = _define_dependencies(self)
+            if common_table_expr is not None:
+                query.append(common_table_expr)
+
+        query.append('SELECT * FROM {} LIMIT {}'
+                     .format(self.sources[0].name, self.n))
+
+        return ' '.join(query)
 
 
 class Equal(Criterion):

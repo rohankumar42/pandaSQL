@@ -92,6 +92,28 @@ class TestDataFrame(unittest.TestCase):
         expected = base_df[base_df['n'] != 0][:]
         self.assertDataFrameEqualsPandas(no_limit, expected)
 
+    def test_order_by(self):
+        base_df = pd.DataFrame([{'x': i // 2, 'y': i % 2} for i in range(10)])
+        df = ps.DataFrame(base_df)
+
+        # Sort on one column
+        ordered = df.sort_values('x', ascending=False)
+        sql = ordered.sql()
+        self.assertEqual(sql, 'SELECT * FROM {} ORDER BY {}.x DESC'
+                         .format(df.name, df.name))
+
+        expected = base_df.sort_values('x', ascending=False)
+        self.assertDataFrameEqualsPandas(ordered, expected)
+
+        # Sort on multiple columns
+        ordered = df.sort_values(['x', 'y'], ascending=[True, False])
+        sql = ordered.sql()
+        self.assertEqual(sql, 'SELECT * FROM {} ORDER BY {}.x ASC, {}.y DESC'
+                         .format(df.name, df.name, df.name))
+
+        expected = base_df.sort_values(['x', 'y'], ascending=[True, False])
+        self.assertDataFrameEqualsPandas(ordered, expected)
+
     def test_simple_join(self):
         base_df_1 = pd.DataFrame([{'n': i, 's1': str(i*2)} for i in range(10)])
         df_1 = ps.DataFrame(base_df_1)
