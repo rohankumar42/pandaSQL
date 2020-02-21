@@ -114,6 +114,25 @@ class TestDataFrame(unittest.TestCase):
         expected = base_df.sort_values(['x', 'y'], ascending=[True, False])
         self.assertDataFrameEqualsPandas(ordered, expected)
 
+    def test_simple_union(self):
+        base_df_1 = pd.DataFrame([{'n': i, 's': str(i)} for i in range(8)])
+        df_1 = ps.DataFrame(base_df_1)
+        base_df_2 = pd.DataFrame([{'n': i, 's': str(i)} for i in range(4, 12)])
+        df_2 = ps.DataFrame(base_df_2)
+        base_df_3 = pd.DataFrame([{'n': i, 's': str(i)} for i in range(8, 16)])
+        df_3 = ps.DataFrame(base_df_3)
+
+        union = ps.concat([df_1, df_2, df_3])
+        self.assertIsInstance(union, ps.Union)
+
+        sql = union.sql()
+        self.assertEqual(sql, 'SELECT * FROM {} UNION ALL SELECT * FROM {} '
+                         'UNION ALL SELECT * FROM {}'
+                         .format(df_1.name, df_2.name, df_3.name))
+
+        expected = pd.concat([base_df_1, base_df_2, base_df_3])
+        self.assertDataFrameEqualsPandas(union, expected)
+
     def test_simple_join(self):
         base_df_1 = pd.DataFrame([{'n': i, 's1': str(i*2)} for i in range(10)])
         df_1 = ps.DataFrame(base_df_1)

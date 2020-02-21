@@ -1,6 +1,7 @@
 # import uuid
 import sqlite3
 import pandas as pd
+from typing import List
 
 from pandasql.utils import _is_supported_constant, _get_dependency_graph, \
     _topological_sort
@@ -112,6 +113,9 @@ class DataFrame(BaseThunk):
         elif isinstance(data, pd.DataFrame):
             df = data
             self.result = df
+        elif isinstance(data, DataFrame):
+            df = data.compute()
+            self.result = df
         elif data is None:
             pass
         else:
@@ -186,13 +190,11 @@ class DataFrame(BaseThunk):
     def sort_values(self, by, ascending=True):
         return OrderBy(self, cols=by, ascending=ascending)
 
-    def join(self, other, on=None, **args):
+    def join(self, other, on=None):
         """TODO: support other pandas join arguments"""
-        assert(isinstance(other, DataFrame))
         if on is None:
-            raise NotImplementedError('TODO: implement cross join')
+            raise NotImplementedError('Joins without key(s) are not supported')
         else:
-            assert(isinstance(on, str))
             return Join(self, other, on)
 
     def __eq__(self, other):
@@ -252,11 +254,6 @@ class Projection(DataFrame):
 
 class Selection(DataFrame):
     def __init__(self, source: DataFrame, criterion: Criterion, name=None):
-        assert(isinstance(source, DataFrame))
-        assert(isinstance(criterion, Criterion))
-
-        # TODO: have well thought out type checking
-
         super().__init__(name=name, sources=[source],
                          base_tables=source.base_tables)
         self.criterion = criterion
@@ -297,8 +294,6 @@ class OrderBy(DataFrame):
 class Join(DataFrame):
     def __init__(self, source_1: DataFrame, source_2: DataFrame,
                  join_keys, name=None):
-        # TODO: have well thought out type checking
-
         super().__init__(name=name, sources=[source_1, source_2],
                          base_tables=source_1.base_tables +
                          source_2.base_tables)
@@ -312,6 +307,16 @@ class Join(DataFrame):
                     ','.join(self.join_keys))
 
 
+class Union(DataFrame):
+    def __init__(self, sources: List[DataFrame], name=None):
+        base_tables = list({base for s in sources for base in s.base_tables})
+        super().__init__(name=name, sources=sources, base_tables=base_tables)
+
+    def _create_sql_query(self):
+        return ' UNION ALL '.join('SELECT * FROM {}'.format(source.name)
+                                  for source in self.sources)
+
+
 class Limit(DataFrame):
     def __init__(self, source: DataFrame, n, name=None):
 
@@ -321,6 +326,18 @@ class Limit(DataFrame):
 
     def _create_sql_query(self):
         return 'SELECT * FROM {} LIMIT {}'.format(self.sources[0].name, self.n)
+
+
+##############################################################################
+#                           Misc. API Functions
+##############################################################################
+
+def concat(objs):
+    return Union(objs)
+
+##############################################################################
+#                           Criterion Classes
+##############################################################################
 
 
 class Equal(Criterion):
@@ -371,9 +388,9 @@ class Not(Criterion):
         return 'NOT ({})'.format(self.sources[0])
 
 
-def read_csv(csv_file, name=None):
-    return DataFrame(pd.read_csv(csv_file, index=False), name=name)
-
+##############################################################################
+#                           Utility Functions
+##############################################################################
 
 def _define_dependencies(df: DataFrame):
     graph = _get_dependency_graph(df)
