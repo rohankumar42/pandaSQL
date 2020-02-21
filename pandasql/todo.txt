@@ -1,0 +1,37 @@
+---- ACTIONS ----
+* __len__                                           # done
+* __str__                                           # done
+* __contains__
+* __getitem__ 
+    * location-based access
+    * Q: how should we loc?
+* file conversions, e.g.,                           
+    * to_csv                                        # done
+    * to_json                                       # done
+    * to_numpy                                      # done
+    * to_pickle                                     # done
+    * ...
+
+
+---- POPULAR FEATURES ----
+* I/O
+    * pd.read_csv()                                 # done
+    * pd.read_json()                                # done
+    * pd.read_numpy()                               # done
+    * pd.read_pickle()                              # done
+* df.head()                                         # done
+* df.sort_values(...)                               # done
+* pd.concat([df1, df2, ..., dfn])                   # done
+* pd.DataFrame.columns                              # done
+* aggregations
+    * .sum()
+* column/Series operations
+    * +/-/* etc. 
+    * df['x'] = 1
+    * df['a'] += 1
+    * df['a'] = df['b'] + 2 * df['c']
+        * Maybe: UPDATE TABLE T5 SET T5.a = T5.b + 2 * T5.c 
+    * aggregations for a column
+* Data Manipulation (updates/writes)
+    * .replace(...)
+    * 
