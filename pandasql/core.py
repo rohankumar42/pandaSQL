@@ -231,6 +231,22 @@ class DataFrame(BaseThunk):
         else:
             raise TypeError('Only constants and Projections are accepted')
 
+    @require_result
+    def to_csv(self, *args, **kwargs):
+        return self.result.to_csv(*args, **kwargs)
+
+    @require_result
+    def to_json(self, *args, **kwargs):
+        return self.result.to_json(*args, **kwargs)
+
+    @require_result
+    def to_numpy(self, *args, **kwargs):
+        return self.result.to_numpy(*args, **kwargs)
+
+    @require_result
+    def to_pickle(self, *args, **kwargs):
+        return self.result.to_pickle(*args, **kwargs)
+
 
 class Projection(DataFrame):
     def __init__(self, source: DataFrame, col, name=None):
