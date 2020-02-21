@@ -1,6 +1,8 @@
 import unittest
+
 import pandas as pd
 import pandasql as ps
+from pandasql.core import Selection, Projection, Union, Join, Limit, OrderBy
 
 
 class TestDataFrame(unittest.TestCase):
@@ -21,7 +23,7 @@ class TestDataFrame(unittest.TestCase):
         base_df = pd.DataFrame([{'n': i, 's': str(i*2)} for i in range(10)])
         df = ps.DataFrame(base_df)
         proj = df['n']
-        self.assertIsInstance(proj, ps.Projection)
+        self.assertIsInstance(proj, Projection)
 
         sql = proj.sql()
         self.assertEqual(sql, 'SELECT n FROM {}'.format(df.name))
@@ -33,7 +35,7 @@ class TestDataFrame(unittest.TestCase):
         base_df = pd.DataFrame([{'n': i, 's': str(i*2)} for i in range(10)])
         df = ps.DataFrame(base_df)
         proj = df[['n', 's']]
-        self.assertIsInstance(proj, ps.Projection)
+        self.assertIsInstance(proj, Projection)
 
         sql = proj.sql()
         self.assertEqual(sql, 'SELECT n, s FROM {}'.format(df.name))
@@ -45,7 +47,7 @@ class TestDataFrame(unittest.TestCase):
         base_df = pd.DataFrame([{'n': i, 's': str(i*2)} for i in range(10)])
         df = ps.DataFrame(base_df)
         selection = df[df['n'] == 5]
-        self.assertIsInstance(selection, ps.Selection)
+        self.assertIsInstance(selection, Selection)
 
         sql = selection.sql()
         self.assertEqual(sql, 'SELECT * FROM {} WHERE {}.n = 5'
@@ -73,6 +75,7 @@ class TestDataFrame(unittest.TestCase):
         df = ps.DataFrame(base_df)
         selection = df[df['n'] != 0]
         limit = selection[:5]
+        self.assertIsInstance(limit, Limit)
 
         sql = limit.sql()
         self.assertEqual(sql, 'WITH {} AS (SELECT * FROM {} WHERE {}.n <> 0) '
@@ -98,6 +101,8 @@ class TestDataFrame(unittest.TestCase):
 
         # Sort on one column
         ordered = df.sort_values('x', ascending=False)
+        self.assertIsInstance(ordered, OrderBy)
+
         sql = ordered.sql()
         self.assertEqual(sql, 'SELECT * FROM {} ORDER BY {}.x DESC'
                          .format(df.name, df.name))
@@ -123,7 +128,7 @@ class TestDataFrame(unittest.TestCase):
         df_3 = ps.DataFrame(base_df_3)
 
         union = ps.concat([df_1, df_2, df_3])
-        self.assertIsInstance(union, ps.Union)
+        self.assertIsInstance(union, Union)
 
         sql = union.sql()
         self.assertEqual(sql, 'SELECT * FROM {} UNION ALL SELECT * FROM {} '
@@ -139,7 +144,7 @@ class TestDataFrame(unittest.TestCase):
         base_df_2 = pd.DataFrame([{'n': i, 's2': str(i*2)} for i in range(10)])
         df_2 = ps.DataFrame(base_df_2)
         joined = df_1.join(df_2, on='n')
-        self.assertIsInstance(joined, ps.Join)
+        self.assertIsInstance(joined, Join)
 
         sql = joined.sql()
         self.assertEqual(sql, 'SELECT * FROM {} JOIN {} USING (n)'
@@ -157,7 +162,7 @@ class TestDataFrame(unittest.TestCase):
         S2 = T2[T2['n'] >= 3]
         joined = S1.join(S2, on='n')
 
-        self.assertIsInstance(joined, ps.Join)
+        self.assertIsInstance(joined, Join)
         self.assertEqual(joined.sql(), 'WITH {} AS ({}), {} AS ({}) '
                          'SELECT * FROM {} JOIN {} USING (n)'
                          .format(S1.name, S1.sql(False),
