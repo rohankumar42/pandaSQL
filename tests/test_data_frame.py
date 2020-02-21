@@ -198,6 +198,15 @@ class TestDataFrame(unittest.TestCase):
         neg_expected = base_df[~(base_df['s'] != '2')]
         self.assertDataFrameEqualsPandas(neg, neg_expected)
 
+    def test_columns(self):
+        df = pd.DataFrame([{'a': i, 'b': i*2, 'c': i-1} for i in range(10)])
+        T = ps.DataFrame(df)
+        out = T[T['a'] < 5]
+
+        pd.testing.assert_index_equal(out[['c']].columns, df[['c']].columns)
+        pd.testing.assert_index_equal(out[['b', 'c']].columns,
+                                      df[['b', 'c']].columns)
+
     def test_implicit_compute_on_len(self):
         T = ps.DataFrame([{'n': i, 's': str(i*2)} for i in range(10)])
         selection = T[T['n'] < 5]

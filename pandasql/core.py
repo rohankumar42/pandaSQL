@@ -179,6 +179,12 @@ class DataFrame(BaseThunk):
     def head(self, n=5):
         return self[:n]
 
+    @property
+    def columns(self):
+        # Quick hack: compute the first row of the result
+        result = self[:1].compute()
+        return result.columns
+
     @require_result
     def __str__(self):
         return str(self.result)
