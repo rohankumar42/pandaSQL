@@ -253,6 +253,27 @@ class DataFrame(BaseThunk):
     def to_pickle(self, *args, **kwargs):
         return self.result.to_pickle(*args, **kwargs)
 
+    @require_result
+    def _repr_html_(self, *args, **kwargs):
+        '''For being pretty in Jupyter noteboks'''
+        return self.result._repr_html_(*args, **kwargs)
+
+    @require_result
+    def _repr_latex_(self, *args, **kwargs):
+        return self.result._repr_latex_(*args, **kwargs)
+
+    @require_result
+    def _repr_data_resource_(self, *args, **kwargs):
+        return self.result._repr_data_resource_(*args, **kwargs)
+
+    @require_result
+    def _repr_fits_horizontal_(self, *args, **kwargs):
+        return self.result._repr_fits_horizontal_(*args, **kwargs)
+
+    @require_result
+    def _repr_fits_vertical_(self, *args, **kwargs):
+        return self.result._repr_fits_vertical_(*args, **kwargs)
+
 
 class Projection(DataFrame):
     def __init__(self, source: DataFrame, col, name=None):
