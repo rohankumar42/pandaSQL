@@ -86,8 +86,8 @@ class Criterion(BaseThunk):
     def _source_to_str(source):
         if isinstance(source, Projection):
             attrs = ', '.join('{}.{}'.format(source.sources[0].name, col)
-                              for col in source.cols)
-            if len(source.cols) > 1:
+                              for col in source.columns)
+            if len(source.columns) > 1:
                 attrs = '({})'.format(attrs)
             return attrs
 
@@ -104,6 +104,7 @@ class DataFrame(BaseThunk):
         self.sources = sources or []
         self.base_tables = base_tables or [self]
         self.result = None
+        self.columns = None
         df = None
 
         # If data provided, result is already ready
@@ -122,9 +123,12 @@ class DataFrame(BaseThunk):
             raise TypeError('Cannot create table from object of type {}'
                             .format(type(data)))
 
-        # Offload dataframe to SQLite
         if df is not None and len(df) > 0:
+            # Offload dataframe to SQLite
             df.to_sql(name=self.name, con=SQL_CON, index=False)
+
+            # Store columns
+            self.columns = df.columns
 
     @property
     def is_base_table(self):
@@ -165,7 +169,7 @@ class DataFrame(BaseThunk):
         return ' '.join(query)
 
     def __getitem__(self, x):
-        if isinstance(x, str) or isinstance(x, list):  # TODO: check valid cols
+        if isinstance(x, str) or isinstance(x, list):
             return Projection(self, x)
         elif isinstance(x, Criterion):
             return Selection(self, x)
@@ -178,12 +182,6 @@ class DataFrame(BaseThunk):
 
     def head(self, n=5):
         return self[:n]
-
-    @property
-    def columns(self):
-        # Quick hack: compute the first row of the result
-        result = self[:1].compute()
-        return result.columns
 
     @require_result
     def __str__(self):
@@ -288,10 +286,14 @@ class Projection(DataFrame):
 
         super().__init__(name=name, sources=[source],
                          base_tables=source.base_tables)
-        self.cols = cols
+
+        if len(pd.Index(cols).difference(source.columns)) > 0:
+            raise ValueError("Projection columns {} are not a subset of {}"
+                             .format(cols, source.columns))
+        self.columns = source.columns[source.columns.isin(cols)]
 
     def _create_sql_query(self):
-        return 'SELECT {} FROM {}'.format(', '.join(self.cols),
+        return 'SELECT {} FROM {}'.format(', '.join(self.columns),
                                           self.sources[0].name)
 
 
@@ -300,6 +302,7 @@ class Selection(DataFrame):
         super().__init__(name=name, sources=[source],
                          base_tables=source.base_tables)
         self.criterion = criterion
+        self.columns = source.columns
 
     def _create_sql_query(self):
         return 'SELECT * FROM {} WHERE {}'.format(self.sources[0].name,
@@ -320,14 +323,15 @@ class OrderBy(DataFrame):
                              "but found len(cols)={} and len(ascending)={}"
                              .format(len(cols), len(ascending)))
 
-        self.cols = cols
+        self.order_cols = cols
         self.ascending = ascending
+        self.columns = source.columns
 
     def _create_sql_query(self):
         order_by = [
             '{}.{} {}'.format(self.sources[0].name, col,
                               'ASC' if asc else 'DESC')
-            for col, asc in zip(self.cols, self.ascending)
+            for col, asc in zip(self.order_cols, self.ascending)
         ]
 
         return 'SELECT * FROM {} ORDER BY {}' \
@@ -344,6 +348,15 @@ class Join(DataFrame):
             join_keys = [join_keys]
         self.join_keys = join_keys
 
+        join_index = pd.Index(join_keys)
+        for source in self.sources:
+            if len(join_index.difference(source.columns)) > 0:
+                raise ValueError("Source {} does not contain all join keys {}"
+                                 .format(source.name, join_keys))
+
+        self.columns = source_1.columns.append(
+            source_2.columns.drop(join_keys))
+
     def _create_sql_query(self):
         return 'SELECT * FROM {} JOIN {} USING ({})' \
             .format(self.sources[0].name, self.sources[1].name,
@@ -354,6 +367,14 @@ class Union(DataFrame):
     def __init__(self, sources: List[DataFrame], name=None):
         base_tables = list({base for s in sources for base in s.base_tables})
         super().__init__(name=name, sources=sources, base_tables=base_tables)
+
+        self.columns = pd.Index([])
+        schema = sources[0].columns
+        for source in sources:
+            self.columns = self.columns.append(source.columns)
+            if len(source.columns.symmetric_difference(schema)) > 0:
+                raise ValueError(
+                    "Cannot union sources with different schemas!")
 
     def _create_sql_query(self):
         return ' UNION ALL '.join('SELECT * FROM {}'.format(source.name)
@@ -366,6 +387,8 @@ class Limit(DataFrame):
         super().__init__(name=name, sources=[source],
                          base_tables=source.base_tables)
         self.n = n
+
+        self.columns = source.columns
 
     def _create_sql_query(self):
         return 'SELECT * FROM {} LIMIT {}'.format(self.sources[0].name, self.n)
