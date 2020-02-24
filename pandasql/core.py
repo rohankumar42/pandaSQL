@@ -184,6 +184,9 @@ class DataFrame(BaseThunk):
         else:
             raise TypeError('Unsupported indexing type {}'.format(type(x)))
 
+    def __setitem__(self, key, item):
+        raise NotImplementedError("TODO: lazy (column) writes and updates")
+
     def head(self, n=5):
         return self[:n]
 
@@ -206,24 +209,24 @@ class DataFrame(BaseThunk):
             return Join(self, other, on)
 
     def __eq__(self, other):
-        return self._comparison(other, Equal)
+        return self.__comparison(other, Equal)
 
     def __ne__(self, other):
-        return self._comparison(other, NotEqual)
+        return self.__comparison(other, NotEqual)
 
     def __lt__(self, other):
-        return self._comparison(other, LessThan)
+        return self.__comparison(other, LessThan)
 
     def __le__(self, other):
-        return self._comparison(other, LessThanOrEqual)
+        return self.__comparison(other, LessThanOrEqual)
 
     def __gt__(self, other):
-        return self._comparison(other, GreaterThan)
+        return self.__comparison(other, GreaterThan)
 
     def __ge__(self, other):
-        return self._comparison(other, GreaterThanOrEqual)
+        return self.__comparison(other, GreaterThanOrEqual)
 
-    def _comparison(self, other, how_class):
+    def __comparison(self, other, how_class):
         return how_class(self._make_projection_or_constant(self),
                          self._make_projection_or_constant(other))
 
@@ -377,8 +380,7 @@ class Union(DataFrame):
         for source in sources:
             self.columns = self.columns.append(source.columns)
             if len(source.columns.symmetric_difference(schema)) > 0:
-                raise ValueError(
-                    "Cannot union sources with different schemas!")
+                raise ValueError("Cannot union sources with different schemas")
 
     def _create_sql_query(self):
         return ' UNION ALL '.join('SELECT * FROM {}'.format(source.name)
@@ -386,12 +388,11 @@ class Union(DataFrame):
 
 
 class Limit(DataFrame):
-    def __init__(self, source: DataFrame, n, name=None):
+    def __init__(self, source: DataFrame, n: int, name=None):
 
         super().__init__(name=name, sources=[source],
                          base_tables=source.base_tables)
         self.n = n
-
         self.columns = source.columns
 
     def _create_sql_query(self):
@@ -402,8 +403,10 @@ class Limit(DataFrame):
 #                           Misc. API Functions
 ##############################################################################
 
-def concat(objs):
+
+def concat(objs: List[DataFrame]):
     return Union(objs)
+
 
 ##############################################################################
 #                           Criterion Classes
@@ -461,6 +464,7 @@ class Not(Criterion):
 ##############################################################################
 #                           Utility Functions
 ##############################################################################
+
 
 def _define_dependencies(df: DataFrame):
     graph = _get_dependency_graph(df)
