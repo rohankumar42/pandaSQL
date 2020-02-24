@@ -146,10 +146,14 @@ class DataFrame(BaseThunk):
     def compute(self):
 
         if self.result is None:
+            # Compute result and store in SQLite table
             query = self.sql(dependencies=True)
-            self.result = pd.read_sql_query(query, con=SQL_CON)
-            # TODO: directly save results in SQLite instead
-            self.result.to_sql(name=self.name, con=SQL_CON, index=False)
+            compute_query = 'CREATE TABLE {} AS {}'.format(self.name, query)
+            SQL_CON.execute(compute_query)
+
+            # Read table as Pandas DataFrame
+            read_query = 'SELECT * FROM {}'.format(self.name)
+            self.result = pd.read_sql_query(read_query, con=SQL_CON)
 
         return self.result
 
