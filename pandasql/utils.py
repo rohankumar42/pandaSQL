@@ -1,3 +1,4 @@
+# import uuid
 from queue import Queue
 from collections import defaultdict
 
@@ -5,9 +6,20 @@ from collections import defaultdict
 # TODO: add more supported types
 SUPPORTED_TYPES = [int, float, str]
 
+# TODO: switch to uuids when done testing
+COUNT = 0
+
 
 def _is_supported_constant(x):
     return any(isinstance(x, t) for t in SUPPORTED_TYPES)
+
+
+def _new_name():
+    # name = uuid.uuid4().hex
+    global COUNT
+    name = 'T' + str(COUNT)
+    COUNT += 1
+    return name
 
 
 def _get_dependency_graph(table):

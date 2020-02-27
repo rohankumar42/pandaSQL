@@ -4,19 +4,14 @@ import pandas as pd
 from typing import List
 
 from pandasql.utils import _is_supported_constant, _get_dependency_graph, \
-    _topological_sort
+    _topological_sort, _new_name
 
-# TODO: switch to uuids when done testing
-COUNT = 0
 SQL_CON = sqlite3.connect(":memory:")
 
 
 class BaseThunk(object):
     def __init__(self, name=None):
-        # self.name = name or uuid.uuid4().hex
-        global COUNT
-        self.name = name or 'T' + str(COUNT)
-        COUNT += 1
+        self.name = name or _new_name()
         self.sources = []
 
     def sql(self, dependencies=True):
@@ -154,6 +149,7 @@ class DataFrame(BaseThunk):
             # Read table as Pandas DataFrame
             read_query = 'SELECT * FROM {}'.format(self.name)
             self.result = pd.read_sql_query(read_query, con=SQL_CON)
+            self.columns = self.result.columns
 
         return self.result
 
@@ -190,14 +186,6 @@ class DataFrame(BaseThunk):
     def head(self, n=5):
         return self[:n]
 
-    @require_result
-    def __str__(self):
-        return str(self.result)
-
-    @require_result
-    def __len__(self):
-        return len(self.result)
-
     def sort_values(self, by, ascending=True):
         return OrderBy(self, cols=by, ascending=ascending)
 
@@ -208,39 +196,13 @@ class DataFrame(BaseThunk):
         else:
             return Join(self, other, on)
 
-    def __eq__(self, other):
-        return self.__comparison(other, Equal)
+    @require_result
+    def __str__(self):
+        return str(self.result)
 
-    def __ne__(self, other):
-        return self.__comparison(other, NotEqual)
-
-    def __lt__(self, other):
-        return self.__comparison(other, LessThan)
-
-    def __le__(self, other):
-        return self.__comparison(other, LessThanOrEqual)
-
-    def __gt__(self, other):
-        return self.__comparison(other, GreaterThan)
-
-    def __ge__(self, other):
-        return self.__comparison(other, GreaterThanOrEqual)
-
-    def __comparison(self, other, how_class):
-        return how_class(self._make_projection_or_constant(self),
-                         self._make_projection_or_constant(other))
-
-    def __hash__(self):
-        return super().__hash__()
-
-    @staticmethod
-    def _make_projection_or_constant(x):
-        if isinstance(x, Projection):
-            return x
-        elif _is_supported_constant(x):
-            return Constant(x)
-        else:
-            raise TypeError('Only constants and Projections are accepted')
+    @require_result
+    def __len__(self):
+        return len(self.result)
 
     @require_result
     def to_csv(self, *args, **kwargs):
@@ -279,6 +241,18 @@ class DataFrame(BaseThunk):
     def _repr_fits_vertical_(self, *args, **kwargs):
         return self.result._repr_fits_vertical_(*args, **kwargs)
 
+    @staticmethod
+    def _make_projection_or_constant(x):
+        if isinstance(x, Projection):
+            return x
+        elif _is_supported_constant(x):
+            return Constant(x)
+        else:
+            raise TypeError('Only constants and Projections are accepted')
+
+    def __hash__(self):
+        return super().__hash__()
+
 
 class Projection(DataFrame):
     def __init__(self, source: DataFrame, col, name=None):
@@ -302,6 +276,30 @@ class Projection(DataFrame):
     def _create_sql_query(self):
         return 'SELECT {} FROM {}'.format(', '.join(self.columns),
                                           self.sources[0].name)
+
+    def __eq__(self, other):
+        return self.__comparison(other, Equal)
+
+    def __ne__(self, other):
+        return self.__comparison(other, NotEqual)
+
+    def __lt__(self, other):
+        return self.__comparison(other, LessThan)
+
+    def __le__(self, other):
+        return self.__comparison(other, LessThanOrEqual)
+
+    def __gt__(self, other):
+        return self.__comparison(other, GreaterThan)
+
+    def __ge__(self, other):
+        return self.__comparison(other, GreaterThanOrEqual)
+
+    def __comparison(self, other, how_class):
+        return how_class(self, self._make_projection_or_constant(other))
+
+    def __hash__(self):
+        return super().__hash__()
 
 
 class Selection(DataFrame):
