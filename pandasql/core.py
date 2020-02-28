@@ -98,9 +98,15 @@ class DataFrame(BaseThunk):
         super().__init__(name=name)
         self.sources = sources or []
         self.base_tables = base_tables or [self]
+        self.dependents = []
+        self.update = None
         self.result = None
         self.columns = None
         df = None
+
+        # For each source, add this as a dependent
+        for source in self.sources:
+            source.dependents.append(self)
 
         # If data provided, result is already ready
         if isinstance(data, dict) or isinstance(data, list):
@@ -154,7 +160,10 @@ class DataFrame(BaseThunk):
         return self.result
 
     def _create_sql_query(self):
-        raise NotImplementedError("DataFrame objects don't need a SQL query")
+        if self.update is None:
+            return 'SELECT * FROM {}'.format(self.name)
+        else:
+            return self.update._create_sql_query()
 
     def sql(self, dependencies=True):
         query = []
@@ -180,8 +189,29 @@ class DataFrame(BaseThunk):
         else:
             raise TypeError('Unsupported indexing type {}'.format(type(x)))
 
-    def __setitem__(self, key, item):
-        raise NotImplementedError("TODO: lazy (column) writes and updates")
+    def __setitem__(self, col, value):
+        # Make a copy of self which will act as the source of all DataFrames
+        # which already depend on self
+        old = DataFrame()
+        old.__dict__.update(self.__dict__)
+
+        # For all dependents, replace self as a source, and add old instead
+        for dependent in old.dependents:
+            dependent.sources.remove(self)
+            dependent.sources.append(old)
+
+        # Create a new DataFrame (which will become self), and add old
+        # as a source, tracking the update that is being done
+        new = DataFrame(sources=[old], base_tables=old.base_tables)
+        new.update = Update(old, new, col, value)
+
+        # If column is new, add it to columns
+        new.columns = old.columns
+        if col not in old.columns:
+            new.columns = old.columns.insert(len(old.columns), col)
+
+        # Update self to new object
+        self.__dict__.update(new.__dict__)
 
     def head(self, n=5):
         return self[:n]
@@ -252,6 +282,44 @@ class DataFrame(BaseThunk):
 
     def __hash__(self):
         return super().__hash__()
+
+
+class Update(object):
+    def __init__(self, source: DataFrame, dest: DataFrame, col: str, value):
+        # TODO: check if projection is from the same df?
+        # TODO: allow for constants too
+        # TODO: allow for arithmetic on Projections/Constants too
+
+        value = DataFrame._make_projection_or_constant(value)
+
+        if isinstance(value, Projection) and len(value.columns) != 1:
+            raise ValueError("Cannot set col {} using multiple cols {}"
+                             .format(col, value.columns))
+
+        self.source = source
+        self.dest = dest
+        self.col = col
+        self.value = value
+
+    def _create_sql_query(self):
+        columns = self.source.columns
+        columns = columns.drop(self.col) if self.col in columns else columns
+
+        if isinstance(self.value, Projection):
+            new_column = '{} AS {}'.format(self.value.columns[0], self.col)
+        else:
+            raise NotImplementedError
+
+        columns = columns.insert(len(columns), new_column)
+
+        return 'SELECT {} FROM {}'.format(', '.join(columns), self.source.name)
+
+    def __str__(self):
+        # TODO: correct this when constants are supported too
+        assert(isinstance(self.value, Projection))
+        return 'Update({} to {}, {} <- {})'.format(self.source.name,
+                                                   self.dest.name, self.col,
+                                                   self.value.columns[0])
 
 
 class Projection(DataFrame):

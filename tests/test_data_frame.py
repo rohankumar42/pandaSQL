@@ -246,6 +246,35 @@ class TestDataFrame(unittest.TestCase):
             base_df_2[base_df_2['n'] >= 3], on='n')
         self.assertDataFrameEqualsPandas(joined, expected)
 
+    def test_duplicating_column(self):
+        base_df = pd.DataFrame([{'n': i, 'a': str(i*2)} for i in range(10)])
+        df = ps.DataFrame(base_df)
+
+        # New column
+        df['b'] = df['a']
+        base_df['b'] = base_df['a']
+
+        pd.testing.assert_index_equal(df.columns, base_df.columns)
+        self.assertDataFrameEqualsPandas(df, base_df)
+
+    def test_old_dependents_after_write(self):
+        base_df = pd.DataFrame([{'n': i, 'a': str(i*2)} for i in range(10)])
+        df = ps.DataFrame(base_df)
+
+        old_proj = df['a']
+        expected_old_proj = base_df[['a']]
+
+        # Change values in column
+        df['a'] = df['n']
+        base_df['a'] = base_df['n']
+
+        # df should have the updated column
+        pd.testing.assert_index_equal(df.columns, base_df.columns)
+        self.assertDataFrameEqualsPandas(df, base_df)
+
+        # But old_proj should have old values of column
+        self.assertDataFrameEqualsPandas(old_proj, expected_old_proj)
+
 
 if __name__ == "__main__":
     unittest.main()
