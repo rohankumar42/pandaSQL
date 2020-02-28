@@ -27,10 +27,10 @@
     * .sum()
 * column/Series operations
     * +/-/* etc. 
+    * df['x'] = df['a']                             # done
     * df['x'] = 1
     * df['a'] += 1
     * df['a'] = df['b'] + 2 * df['c']
-        * Maybe: UPDATE TABLE T5 SET T5.a = T5.b + 2 * T5.c 
     * aggregations for a column
 * Data Manipulation (updates/writes)
     * .replace(...)
