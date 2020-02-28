@@ -186,7 +186,7 @@ class TestDataFrame(unittest.TestCase):
         self.assertEqual(disj.sql(), 'SELECT * FROM {} WHERE '
                          '{}.n < 2 OR {}.n >= 6'
                          .format(T.name, T.name, T.name))
-        self.assertEqual(neg.sql(), 'SELECT * FROM {} WHERE NOT ({}.s <> 2)'
+        self.assertEqual(neg.sql(), "SELECT * FROM {} WHERE NOT ({}.s <> '2')"
                          .format(T.name, T.name))
 
         conj_expected = base_df[(base_df['n'] > 2) & (base_df['n'] <= 6)]
@@ -253,6 +253,19 @@ class TestDataFrame(unittest.TestCase):
         # New column
         df['b'] = df['a']
         base_df['b'] = base_df['a']
+
+        pd.testing.assert_index_equal(df.columns, base_df.columns)
+        self.assertDataFrameEqualsPandas(df, base_df)
+
+    def test_write_constant_column(self):
+        base_df = pd.DataFrame([{'n': i, 'a': str(i*2)} for i in range(10)])
+        df = ps.DataFrame(base_df)
+
+        # New columns
+        df['b'] = 10
+        base_df['b'] = 10
+        df['c'] = "dummy"
+        base_df['c'] = "dummy"
 
         pd.testing.assert_index_equal(df.columns, base_df.columns)
         self.assertDataFrameEqualsPandas(df, base_df)

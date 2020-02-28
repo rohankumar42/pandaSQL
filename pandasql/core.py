@@ -37,7 +37,10 @@ class Constant(BaseThunk):
         self.value = value
 
     def __str__(self):
-        return str(self.value)
+        if isinstance(self.value, str):
+            return "'{}'".format(self.value)
+        else:
+            return str(self.value)
 
 
 class Criterion(BaseThunk):
@@ -305,21 +308,22 @@ class Update(object):
         columns = self.source.columns
         columns = columns.drop(self.col) if self.col in columns else columns
 
-        if isinstance(self.value, Projection):
-            new_column = '{} AS {}'.format(self.value.columns[0], self.col)
-        else:
-            raise NotImplementedError
+        val = self.value
+        if isinstance(val, Projection):
+            val = val.columns[0]
 
+        new_column = '{} AS {}'.format(val, self.col)
         columns = columns.insert(len(columns), new_column)
 
         return 'SELECT {} FROM {}'.format(', '.join(columns), self.source.name)
 
     def __str__(self):
-        # TODO: correct this when constants are supported too
-        assert(isinstance(self.value, Projection))
+        val = self.value
+        if isinstance(val, Projection):
+            val = val.columns[0]
         return 'Update({} to {}, {} <- {})'.format(self.source.name,
                                                    self.dest.name, self.col,
-                                                   self.value.columns[0])
+                                                   val)
 
 
 class Projection(DataFrame):
