@@ -29,7 +29,6 @@ class BaseThunk(object):
 
 
 class Constant(BaseThunk):
-
     def __init__(self, value, name=None):
         super().__init__(name=name)
         if not _is_supported_constant(value):
@@ -99,6 +98,7 @@ class Criterion(BaseThunk):
 class DataFrame(BaseThunk):
     def __init__(self, data=None, name=None, sources=None, base_tables=None):
         super().__init__(name=name)
+        # TODO: deduplicate sources and base_tables
         self.sources = sources or []
         self.base_tables = base_tables or [self]
         self.dependents = []
@@ -274,15 +274,6 @@ class DataFrame(BaseThunk):
     def _repr_fits_vertical_(self, *args, **kwargs):
         return self.result._repr_fits_vertical_(*args, **kwargs)
 
-    @staticmethod
-    def _make_projection_or_constant(x):
-        if isinstance(x, Projection):
-            return x
-        elif _is_supported_constant(x):
-            return Constant(x)
-        else:
-            raise TypeError('Only constants and Projections are accepted')
-
     def __hash__(self):
         return super().__hash__()
 
@@ -290,19 +281,11 @@ class DataFrame(BaseThunk):
 class Update(object):
     def __init__(self, source: DataFrame, dest: DataFrame, col: str, value):
         # TODO: check if projection is from the same df?
-        # TODO: allow for constants too
-        # TODO: allow for arithmetic on Projections/Constants too
-
-        value = DataFrame._make_projection_or_constant(value)
-
-        if isinstance(value, Projection) and len(value.columns) != 1:
-            raise ValueError("Cannot set col {} using multiple cols {}"
-                             .format(col, value.columns))
 
         self.source = source
         self.dest = dest
         self.col = col
-        self.value = value
+        self.value = _make_projection_or_constant(value, simple=True)
 
     def _create_sql_query(self):
         columns = self.source.columns
@@ -311,6 +294,8 @@ class Update(object):
         val = self.value
         if isinstance(val, Projection):
             val = val.columns[0]
+        elif isinstance(val, Arithmetic):
+            val = val._operation_as_str()
 
         new_column = '{} AS {}'.format(val, self.col)
         columns = columns.insert(len(columns), new_column)
@@ -368,7 +353,11 @@ class Projection(DataFrame):
         return self.__comparison(other, GreaterThanOrEqual)
 
     def __comparison(self, other, how_class):
-        return how_class(self, self._make_projection_or_constant(other))
+        # TODO: move the _make call into Criterion.__init__
+        return how_class(self, _make_projection_or_constant(other))
+
+    def __add__(self, other):
+        return Add(self, other)
 
     def __hash__(self):
         return super().__hash__()
@@ -530,6 +519,57 @@ class Not(Criterion):
     def __str__(self):
         return 'NOT ({})'.format(self.sources[0])
 
+##############################################################################
+#                           Arithmetic Classes
+##############################################################################
+
+
+class Arithmetic(DataFrame):
+    def __init__(self, operation, operand_1, operand_2, name=None):
+
+        self.operand_1 = _make_projection_or_constant(operand_1, simple=True)
+        self.operand_2 = _make_projection_or_constant(operand_2, simple=True)
+        base_tables = []
+        sources = []
+        if isinstance(self.operand_1, DataFrame):
+            base_tables += self.operand_1.base_tables
+            sources += self.operand_1.sources
+        if isinstance(self.operand_2, DataFrame):
+            base_tables += self.operand_2.base_tables
+            sources += self.operand_2.sources
+
+        super().__init__(name=name, sources=sources, base_tables=base_tables)
+
+        self.operation = operation
+
+    def _operation_as_str(self):
+        return '{} {} {}'.format(self._operand_to_str(self.operand_1),
+                                 self.operation,
+                                 self._operand_to_str(self.operand_2))
+
+    def _create_sql_query(self):
+        return 'SELECT {} AS res FROM {}'.format(self._operation_as_str(),
+                                               self.sources[0].name)
+
+    @staticmethod
+    def _operand_to_str(source):
+        if isinstance(source, Projection):
+            return '{}.{}'.format(source.sources[0].name, source.columns[0])
+        elif isinstance(source, Constant):
+            return str(source)
+        elif isinstance(source, Arithmetic):
+            return '({})'.format(source._operation_as_str())
+        else:
+            raise TypeError("Unexpected source type {}".format(type(source)))
+
+    def __add__(self, other):
+        return Add(self, other)
+
+
+class Add(Arithmetic):
+    def __init__(self, source_1, source_2, name=None):
+        super().__init__('+', source_1, source_2, name=name)
+
 
 ##############################################################################
 #                           Utility Functions
@@ -550,3 +590,17 @@ def _define_dependencies(df: DataFrame):
         return 'WITH ' + ', '.join(common_table_exprs)
     else:
         return None
+
+
+def _make_projection_or_constant(x, simple=False, arithmetic=True):
+    if isinstance(x, Projection):
+        if simple and len(x.columns) != 1:
+            raise ValueError("Projections must have exactly 1 column"
+                             "but found columns {}".format(x.columns))
+        return x
+    elif _is_supported_constant(x):
+        return Constant(x)
+    elif arithmetic and isinstance(x, Arithmetic):
+        return x
+    else:
+        raise TypeError('Only constants and Projections are accepted')

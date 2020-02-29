@@ -10,14 +10,16 @@ class TestDataFrame(unittest.TestCase):
     # functionality to test
 
     def assertDataFrameEqualsPandas(self, df: ps.DataFrame,
-                                    expected_df: pd.DataFrame):
+                                    expected_df: pd.DataFrame,
+                                    *args, **kwargs):
         result = df.compute()
 
         # Ignore Pandas index for the comparison
         result.reset_index(drop=True, inplace=True)
         expected_df.reset_index(drop=True, inplace=True)
 
-        pd.testing.assert_frame_equal(result, expected_df)
+        pd.testing.assert_frame_equal(result, expected_df,
+                                      *args, **kwargs)
 
     def test_simple_projection(self):
         base_df = pd.DataFrame([{'n': i, 's': str(i*2)} for i in range(10)])
@@ -287,6 +289,22 @@ class TestDataFrame(unittest.TestCase):
 
         # But old_proj should have old values of column
         self.assertDataFrameEqualsPandas(old_proj, expected_old_proj)
+
+    def test_arithmetic_on_columns(self):
+        base_df = pd.DataFrame([{'n': i, 'm': 10-i} for i in range(10)])
+        df = ps.DataFrame(base_df)
+
+        added = df['n'] + 1 + df['m']
+        base_added = base_df['n'] + 1 + base_df['m']
+
+        self.assertEqual(added.sql(),
+                         'SELECT ({}.n + 1) + {}.m AS res FROM {}'
+                         .format(df.name, df.name, df.name))
+
+        expected = pd.DataFrame()
+        expected['res'] = base_added
+
+        self.assertDataFrameEqualsPandas(added, expected)
 
 
 if __name__ == "__main__":
