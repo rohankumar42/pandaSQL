@@ -1,12 +1,12 @@
 # import uuid
-import sqlite3
 import pandas as pd
 from typing import List
 
 from pandasql.utils import _is_supported_constant, _get_dependency_graph, \
     _topological_sort, _new_name
+from pandasql.sql_utils import get_sqlite_connection
 
-SQL_CON = sqlite3.connect(":memory:")
+SQL_CON = get_sqlite_connection()
 
 
 class BaseThunk(object):
@@ -93,6 +93,77 @@ class Criterion(BaseThunk):
 
         else:
             raise TypeError("Unexpected source type {}".format(type(source)))
+
+
+class ArithmeticOperand(object):
+    def __add__(self, other):
+        return Add(self, other)
+
+    def __sub__(self, other):
+        return Subtract(self, other)
+
+    def __mul__(self, other):
+        return Multiply(self, other)
+
+    def __truediv__(self, other):
+        return Divide(self, other)
+
+    def __floordiv__(self, other):
+        return FloorDivide(self, other)
+
+    def __mod__(self, other):
+        return Modulo(self, other)
+
+    def __pow__(self, other):
+        return Power(self, other)
+
+    def __and__(self, other):
+        return BitAnd(self, other)
+
+    def __or__(self, other):
+        return BitOr(self, other)
+
+    def __xor__(self, other):
+        return BitXor(self, other)
+
+    def __radd__(self, other):
+        return Add(other, self)
+
+    def __rsub__(self, other):
+        return Subtract(other, self)
+
+    def __rmul__(self, other):
+        return Multiply(other, self)
+
+    def __rtruediv__(self, other):
+        return Divide(other, self)
+
+    def __rfloordiv__(self, other):
+        return FloorDivide(other, self)
+
+    def __rmod__(self, other):
+        return Modulo(other, self)
+
+    def __rpow__(self, other):
+        return Power(other, self)
+
+    def __rand__(self, other):
+        return BitAnd(other, self)
+
+    def __ror__(self, other):
+        return BitOr(other, self)
+
+    def __rxor__(self, other):
+        return BitXor(other, self)
+
+    def __invert__(self):
+        return Invert(self)
+
+    def __neg__(self):
+        return Multiply(self, -1)
+
+    def __abs__(self):
+        return Abs(self)
 
 
 class DataFrame(BaseThunk):
@@ -311,7 +382,7 @@ class Update(object):
                                                    val)
 
 
-class Projection(DataFrame):
+class Projection(DataFrame, ArithmeticOperand):
     def __init__(self, source: DataFrame, col, name=None):
 
         if isinstance(col, str):
@@ -355,9 +426,6 @@ class Projection(DataFrame):
     def __comparison(self, other, how_class):
         # TODO: move the _make call into Criterion.__init__
         return how_class(self, _make_projection_or_constant(other))
-
-    def __add__(self, other):
-        return Add(self, other)
 
     def __hash__(self):
         return super().__hash__()
@@ -524,32 +592,48 @@ class Not(Criterion):
 ##############################################################################
 
 
-class Arithmetic(DataFrame):
-    def __init__(self, operation, operand_1, operand_2, name=None):
+class Arithmetic(DataFrame, ArithmeticOperand):
+    def __init__(self, operation, operand_1, operand_2=None, inline=False,
+                 name=None):
 
-        self.operand_1 = _make_projection_or_constant(operand_1, simple=True)
-        self.operand_2 = _make_projection_or_constant(operand_2, simple=True)
         base_tables = []
         sources = []
+
+        self.operand_1 = _make_projection_or_constant(operand_1, simple=True)
         if isinstance(self.operand_1, DataFrame):
             base_tables += self.operand_1.base_tables
             sources += self.operand_1.sources
-        if isinstance(self.operand_2, DataFrame):
-            base_tables += self.operand_2.base_tables
-            sources += self.operand_2.sources
+
+        if operand_2 is not None:
+            self.operand_2 = _make_projection_or_constant(operand_2,
+                                                          simple=True)
+            if isinstance(self.operand_2, DataFrame):
+                base_tables += self.operand_2.base_tables
+                sources += self.operand_2.sources
+
+        self.unary = operand_2 is None
 
         super().__init__(name=name, sources=sources, base_tables=base_tables)
 
         self.operation = operation
+        self.inline = inline
 
     def _operation_as_str(self):
-        return '{} {} {}'.format(self._operand_to_str(self.operand_1),
-                                 self.operation,
-                                 self._operand_to_str(self.operand_2))
+        if self.unary:
+            fmt = '{op}{x}' if self.inline else'{op}({x})'
+
+            return fmt.format(x=self._operand_to_str(self.operand_1),
+                              op=self.operation)
+        else:
+            fmt = '{x} {op} {y}' if self.inline else'{op}({x}, {y})'
+
+            return fmt.format(x=self._operand_to_str(self.operand_1),
+                              y=self._operand_to_str(self.operand_2),
+                              op=self.operation)
 
     def _create_sql_query(self):
         return 'SELECT {} AS res FROM {}'.format(self._operation_as_str(),
-                                               self.sources[0].name)
+                                                 self.sources[0].name)
 
     @staticmethod
     def _operand_to_str(source):
@@ -558,17 +642,72 @@ class Arithmetic(DataFrame):
         elif isinstance(source, Constant):
             return str(source)
         elif isinstance(source, Arithmetic):
-            return '({})'.format(source._operation_as_str())
+            if source.inline:
+                return '({})'.format(source._operation_as_str())
+            else:
+                return source._operation_as_str()
         else:
             raise TypeError("Unexpected source type {}".format(type(source)))
-
-    def __add__(self, other):
-        return Add(self, other)
 
 
 class Add(Arithmetic):
     def __init__(self, source_1, source_2, name=None):
-        super().__init__('+', source_1, source_2, name=name)
+        super().__init__('+', source_1, source_2, name=name, inline=True)
+
+
+class Subtract(Arithmetic):
+    def __init__(self, source_1, source_2, name=None):
+        super().__init__('-', source_1, source_2, name=name, inline=True)
+
+
+class Multiply(Arithmetic):
+    def __init__(self, source_1, source_2, name=None):
+        super().__init__('*', source_1, source_2, name=name, inline=True)
+
+
+class Divide(Arithmetic):
+    def __init__(self, source_1, source_2, name=None):
+        super().__init__('DIV', source_1, source_2, name=name)
+
+
+class FloorDivide(Arithmetic):
+    def __init__(self, source_1, source_2, name=None):
+        super().__init__('FLOORDIV', source_1, source_2, name=name)
+
+
+class Modulo(Arithmetic):
+    def __init__(self, source_1, source_2, name=None):
+        super().__init__('MOD', source_1, source_2, name=name)
+
+
+class Power(Arithmetic):
+    def __init__(self, source_1, source_2, name=None):
+        super().__init__('POW', source_1, source_2, name=name)
+
+
+class BitAnd(Arithmetic):
+    def __init__(self, source_1, source_2, name=None):
+        super().__init__('BITAND', source_1, source_2, name=name)
+
+
+class BitOr(Arithmetic):
+    def __init__(self, source_1, source_2, name=None):
+        super().__init__('BITOR', source_1, source_2, name=name)
+
+
+class BitXor(Arithmetic):
+    def __init__(self, source_1, source_2, name=None):
+        super().__init__('BITXOR', source_1, source_2, name=name)
+
+
+class Invert(Arithmetic):
+    def __init__(self, source, name=None):
+        super().__init__('INV', source, name=name)
+
+
+class Abs(Arithmetic):
+    def __init__(self, source, name=None):
+        super().__init__('abs', source, name=name)
 
 
 ##############################################################################

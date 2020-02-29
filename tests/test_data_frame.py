@@ -290,21 +290,53 @@ class TestDataFrame(unittest.TestCase):
         # But old_proj should have old values of column
         self.assertDataFrameEqualsPandas(old_proj, expected_old_proj)
 
-    def test_arithmetic_on_columns(self):
+    def test_simple_arithmetic_on_columns(self):
         base_df = pd.DataFrame([{'n': i, 'm': 10-i} for i in range(10)])
         df = ps.DataFrame(base_df)
 
-        added = df['n'] + 1 + df['m']
-        base_added = base_df['n'] + 1 + base_df['m']
+        res = df['n'] + 2 * df['m']
+        base_res = base_df['n'] + 2 * base_df['m']
 
-        self.assertEqual(added.sql(),
-                         'SELECT ({}.n + 1) + {}.m AS res FROM {}'
+        self.assertEqual(res.sql(),
+                         'SELECT {}.n + (2 * {}.m) AS res FROM {}'
                          .format(df.name, df.name, df.name))
 
         expected = pd.DataFrame()
-        expected['res'] = base_added
+        expected['res'] = base_res
 
-        self.assertDataFrameEqualsPandas(added, expected)
+        self.assertDataFrameEqualsPandas(res, expected)
+
+    def test_complex_arithmetic_on_columns(self):
+        base_df = pd.DataFrame([{'n': i, 'm': 10-i} for i in range(1, 11)])
+        df = ps.DataFrame(base_df)
+
+        res = 3 / ((abs(-df['n'] // 2) ** df['m']) % 13)
+        base_res = 3 / ((abs(-base_df['n'] // 2) ** base_df['m']) % 13)
+
+        self.assertEqual(res.sql(),
+                         'SELECT DIV(3, MOD(POW(abs(FLOORDIV(({}.n * -1), 2)), {}.m), 13)) AS res FROM {}'  # noqa
+                         .format(df.name, df.name, df.name))
+
+        expected = pd.DataFrame()
+        expected['res'] = base_res
+
+        self.assertDataFrameEqualsPandas(res, expected)
+
+    def test_bitwise_operations_on_columns(self):
+        base_df = pd.DataFrame([{'n': i, 'm': 10-i} for i in range(1, 11)])
+        df = ps.DataFrame(base_df)
+
+        res = (~df['n'] & (df['m'] % 2)) ^ (2 | df['m'])
+        base_res = (~base_df['n'] & (base_df['m'] % 2)) ^ (2 | base_df['m'])
+
+        self.assertEqual(res.sql(),
+                         'SELECT BITXOR(BITAND(INV({}.n), MOD({}.m, 2)), BITOR(2, {}.m)) AS res FROM {}'  # noqa
+                         .format(df.name, df.name, df.name, df.name))
+
+        expected = pd.DataFrame()
+        expected['res'] = base_res
+
+        self.assertDataFrameEqualsPandas(res, expected)
 
 
 if __name__ == "__main__":
