@@ -26,11 +26,12 @@
 * aggregations
     * .sum()
 * column/Series operations
-    * +/-/* etc. 
+    * +/-/* etc.                                    # done
     * df['x'] = df['a']                             # done
-    * df['x'] = 1
-    * df['a'] += 1
-    * df['a'] = df['b'] + 2 * df['c']
+    * df['x'] = 1                                   # done
+    * df['a'] += 1                                  # done
+    * df['a'] |= 1                                  # done
+    * df['a'] = 2 % (df['b'] + 2 ** df['c'])        # done
     * aggregations for a column
 * Data Manipulation (updates/writes)
     * .replace(...)
