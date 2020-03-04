@@ -11,15 +11,15 @@ class TestUtils(unittest.TestCase):
         df_1 = ps.DataFrame(base_df_1)
         base_df_2 = pd.DataFrame([{'n': i, 's2': str(i*2)} for i in range(10)])
         df_2 = ps.DataFrame(base_df_2)
-        joined = df_1.join(df_2, on='n')
+        merged = df_1.merge(df_2, on='n')
 
-        graph = _get_dependency_graph(joined)
+        graph = _get_dependency_graph(merged)
         self.assertIn(df_1, graph)
         self.assertIn(df_2, graph)
-        self.assertIn(joined, graph)
-        self.assertIn(df_1, set(graph[joined]))
-        self.assertIn(df_2, set(graph[joined]))
-        self.assertEqual(len(graph[joined]), 2)
+        self.assertIn(merged, graph)
+        self.assertIn(df_1, set(graph[merged]))
+        self.assertIn(df_2, set(graph[merged]))
+        self.assertEqual(len(graph[merged]), 2)
         self.assertEqual(len(graph[df_1]), 0)
         self.assertEqual(len(graph[df_2]), 0)
 
@@ -28,13 +28,13 @@ class TestUtils(unittest.TestCase):
         df_1 = ps.DataFrame(base_df_1)
         base_df_2 = pd.DataFrame([{'n': i, 's2': str(i*2)} for i in range(10)])
         df_2 = ps.DataFrame(base_df_2)
-        joined = df_1.join(df_2, on='n')
+        merged = df_1.merge(df_2, on='n')
 
-        graph = _get_dependency_graph(joined)
+        graph = _get_dependency_graph(merged)
         ordered = _topological_sort(graph)
         self.assertEqual(ordered[0].name, df_1.name)
         self.assertEqual(ordered[1].name, df_2.name)
-        self.assertEqual(ordered[2].name, joined.name)
+        self.assertEqual(ordered[2].name, merged.name)
 
 
 if __name__ == "__main__":

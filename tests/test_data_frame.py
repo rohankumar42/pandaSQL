@@ -140,32 +140,32 @@ class TestDataFrame(unittest.TestCase):
         expected = pd.concat([base_df_1, base_df_2, base_df_3])
         self.assertDataFrameEqualsPandas(union, expected)
 
-    def test_simple_join(self):
+    def test_simple_merge(self):
         base_df_1 = pd.DataFrame([{'n': i, 's1': str(i*2)} for i in range(10)])
         df_1 = ps.DataFrame(base_df_1)
         base_df_2 = pd.DataFrame([{'n': i, 's2': str(i*2)} for i in range(10)])
         df_2 = ps.DataFrame(base_df_2)
-        joined = df_1.join(df_2, on='n')
-        self.assertIsInstance(joined, Join)
+        merged = df_1.merge(df_2, on='n')
+        self.assertIsInstance(merged, Join)
 
-        sql = joined.sql()
+        sql = merged.sql()
         self.assertEqual(sql, 'SELECT * FROM {} JOIN {} USING (n)'
                          .format(df_1.name, df_2.name))
 
         expected = base_df_1.merge(base_df_2, on='n')
-        self.assertDataFrameEqualsPandas(joined, expected)
+        self.assertDataFrameEqualsPandas(merged, expected)
 
-    def test_join_with_dependencies(self):
+    def test_merg_with_dependencies(self):
         base_df_1 = pd.DataFrame([{'n': i, 's1': str(i*2)} for i in range(10)])
         base_df_2 = pd.DataFrame([{'n': i, 's2': str(i*2)} for i in range(10)])
         T1 = ps.DataFrame(base_df_1)
         T2 = ps.DataFrame(base_df_2)
         S1 = T1[T1['n'] < 8]
         S2 = T2[T2['n'] >= 3]
-        joined = S1.join(S2, on='n')
+        merged = S1.merge(S2, on='n')
 
-        self.assertIsInstance(joined, Join)
-        self.assertEqual(joined.sql(), 'WITH {} AS ({}), {} AS ({}) '
+        self.assertIsInstance(merged, Join)
+        self.assertEqual(merged.sql(), 'WITH {} AS ({}), {} AS ({}) '
                          'SELECT * FROM {} JOIN {} USING (n)'
                          .format(S1.name, S1.sql(False),
                                  S2.name, S2.sql(False),
@@ -173,7 +173,7 @@ class TestDataFrame(unittest.TestCase):
 
         expected = base_df_1[base_df_1['n'] < 8].merge(
             base_df_2[base_df_2['n'] >= 3], on='n')
-        self.assertDataFrameEqualsPandas(joined, expected)
+        self.assertDataFrameEqualsPandas(merged, expected)
 
     def test_complex_criteria(self):
         base_df = pd.DataFrame([{'n': i, 's': str(i*2)} for i in range(10)])
@@ -233,20 +233,20 @@ class TestDataFrame(unittest.TestCase):
         T2 = ps.DataFrame(base_df_2)
         S1 = T1[T1['n'] < 8]
         S2 = T2[T2['n'] >= 3]
-        joined = S1.join(S2, on='n')
+        merged = S1.merge(S2, on='n')
 
         # Compute S1, so its result is cached in SQLite
         S1.compute()
 
-        # Now, the query for joined should not declare S1 again
-        self.assertEqual(joined.sql(), 'WITH {} AS ({}) '
+        # Now, the query for merged should not declare S1 again
+        self.assertEqual(merged.sql(), 'WITH {} AS ({}) '
                          'SELECT * FROM {} JOIN {} USING (n)'
                          .format(S2.name, S2.sql(False),
                                  S1.name, S2.name))
 
         expected = base_df_1[base_df_1['n'] < 8].merge(
             base_df_2[base_df_2['n'] >= 3], on='n')
-        self.assertDataFrameEqualsPandas(joined, expected)
+        self.assertDataFrameEqualsPandas(merged, expected)
 
     def test_duplicating_column(self):
         base_df = pd.DataFrame([{'n': i, 'a': str(i*2)} for i in range(10)])

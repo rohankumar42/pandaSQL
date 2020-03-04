@@ -290,7 +290,7 @@ class DataFrame(BaseThunk):
     def sort_values(self, by, ascending=True):
         return OrderBy(self, cols=by, ascending=ascending)
 
-    def join(self, other, on=None):
+    def merge(self, other, on=None):
         """TODO: support other pandas join arguments"""
         if on is None:
             raise NotImplementedError('Joins without key(s) are not supported')
