@@ -233,12 +233,6 @@ class DataFrame(BaseThunk):
 
         return self.result
 
-    def _create_sql_query(self):
-        if self.update is None:
-            return 'SELECT * FROM {}'.format(self.name)
-        else:
-            return self.update._create_sql_query()
-
     def sql(self, dependencies=True):
         query = []
 
@@ -247,7 +241,10 @@ class DataFrame(BaseThunk):
             if common_table_expr is not None:
                 query.append(common_table_expr)
 
-        query.append(self._create_sql_query())
+        if self.update is None:
+            query.append(self._sql_query)
+        else:
+            query.append(self.update._sql_query)
 
         return ' '.join(query)
 
@@ -358,7 +355,6 @@ class Update(object):
         self.col = col
         self.value = _make_projection_or_constant(value, simple=True)
 
-    def _create_sql_query(self):
         columns = self.source.columns
         columns = columns.drop(self.col) if self.col in columns else columns
 
@@ -371,7 +367,8 @@ class Update(object):
         new_column = '{} AS {}'.format(val, self.col)
         columns = columns.insert(len(columns), new_column)
 
-        return 'SELECT {} FROM {}'.format(', '.join(columns), self.source.name)
+        self._sql_query = 'SELECT {} FROM {}'.format(', '.join(columns),
+                                                     self.source.name)
 
     def __str__(self):
         val = self.value
@@ -401,9 +398,8 @@ class Projection(DataFrame, ArithmeticOperand):
                              .format(cols, source.columns))
         self.columns = source.columns[source.columns.isin(cols)]
 
-    def _create_sql_query(self):
-        return 'SELECT {} FROM {}'.format(', '.join(self.columns),
-                                          self.sources[0].name)
+        self._sql_query = 'SELECT {} FROM {}'.format(', '.join(self.columns),
+                                                     self.sources[0].name)
 
     def __eq__(self, other):
         return self.__comparison(other, Equal)
@@ -438,9 +434,8 @@ class Selection(DataFrame):
         self.criterion = criterion
         self.columns = source.columns
 
-    def _create_sql_query(self):
-        return 'SELECT * FROM {} WHERE {}'.format(self.sources[0].name,
-                                                  self.criterion)
+        self._sql_query = 'SELECT * FROM {} WHERE {}'.format(
+            self.sources[0].name, self.criterion)
 
 
 class OrderBy(DataFrame):
@@ -461,14 +456,13 @@ class OrderBy(DataFrame):
         self.ascending = ascending
         self.columns = source.columns
 
-    def _create_sql_query(self):
         order_by = [
             '{}.{} {}'.format(self.sources[0].name, col,
                               'ASC' if asc else 'DESC')
             for col, asc in zip(self.order_cols, self.ascending)
         ]
 
-        return 'SELECT * FROM {} ORDER BY {}' \
+        self._sql_query = 'SELECT * FROM {} ORDER BY {}' \
             .format(self.sources[0].name, ', '.join(order_by))
 
 
@@ -491,8 +485,7 @@ class Join(DataFrame):
         self.columns = source_1.columns.append(
             source_2.columns.drop(join_keys))
 
-    def _create_sql_query(self):
-        return 'SELECT * FROM {} JOIN {} USING ({})' \
+        self._sql_query = 'SELECT * FROM {} JOIN {} USING ({})' \
             .format(self.sources[0].name, self.sources[1].name,
                     ','.join(self.join_keys))
 
@@ -509,9 +502,9 @@ class Union(DataFrame):
             if len(source.columns.symmetric_difference(schema)) > 0:
                 raise ValueError("Cannot union sources with different schemas")
 
-    def _create_sql_query(self):
-        return ' UNION ALL '.join('SELECT * FROM {}'.format(source.name)
-                                  for source in self.sources)
+        self._sql_query = ' UNION ALL '.join('SELECT * FROM {}'
+                                             .format(source.name)
+                                             for source in self.sources)
 
 
 class Limit(DataFrame):
@@ -522,8 +515,8 @@ class Limit(DataFrame):
         self.n = n
         self.columns = source.columns
 
-    def _create_sql_query(self):
-        return 'SELECT * FROM {} LIMIT {}'.format(self.sources[0].name, self.n)
+        self._sql_query = 'SELECT * FROM {} LIMIT {}'.format(
+            self.sources[0].name, self.n)
 
 
 ##############################################################################
@@ -618,6 +611,9 @@ class Arithmetic(DataFrame, ArithmeticOperand):
         self.operation = operation
         self.inline = inline
 
+        self._sql_query = 'SELECT {} AS res FROM {}'.format(
+            self._operation_as_str(), self.sources[0].name)
+
     def _operation_as_str(self):
         if self.unary:
             fmt = '{op}{x}' if self.inline else'{op}({x})'
@@ -630,10 +626,6 @@ class Arithmetic(DataFrame, ArithmeticOperand):
             return fmt.format(x=self._operand_to_str(self.operand_1),
                               y=self._operand_to_str(self.operand_2),
                               op=self.operation)
-
-    def _create_sql_query(self):
-        return 'SELECT {} AS res FROM {}'.format(self._operation_as_str(),
-                                                 self.sources[0].name)
 
     @staticmethod
     def _operand_to_str(source):

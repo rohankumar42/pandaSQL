@@ -265,12 +265,31 @@ class TestDataFrame(unittest.TestCase):
 
         # New columns
         df['b'] = 10
+        df['c'] = 'dummy'
+
+        # Same operations on Pandas
         base_df['b'] = 10
-        df['c'] = "dummy"
-        base_df['c'] = "dummy"
+        base_df['c'] = 'dummy'
 
         pd.testing.assert_index_equal(df.columns, base_df.columns)
         self.assertDataFrameEqualsPandas(df, base_df)
+
+    def test_write_on_downstream_dataframe(self):
+        base_df = pd.DataFrame([{'n': i, 'a': str(i*2)} for i in range(10)])
+        df = ps.DataFrame(base_df)
+
+        # New columns
+        selection = df[df['a'] != '4']
+        selection['b'] = 10
+
+        # Same operations on Pandas
+        expected = base_df[base_df['a'] != '4']
+        # Make new copy to avoid Pandas warning about writing to a slice
+        expected = pd.DataFrame(expected)
+        expected['b'] = 10
+
+        pd.testing.assert_index_equal(selection.columns, expected.columns)
+        self.assertDataFrameEqualsPandas(selection, expected)
 
     def test_old_dependents_after_write(self):
         base_df = pd.DataFrame([{'n': i, 'a': str(i*2)} for i in range(10)])
