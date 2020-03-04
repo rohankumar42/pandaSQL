@@ -524,6 +524,11 @@ class Limit(DataFrame):
 ##############################################################################
 
 
+def merge(left, right, on=None):
+    """TODO: support other pandas join arguments"""
+    return Join(objs)
+
+
 def concat(objs: List[DataFrame]):
     return Union(objs)
 
