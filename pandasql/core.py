@@ -189,11 +189,10 @@ class ArithmeticOperand(object):
 
 
 class DataFrame(BaseThunk):
-    def __init__(self, data=None, name=None, sources=None, base_tables=None):
+    def __init__(self, data=None, name=None, sources=None):
         super().__init__(name=name)
-        # TODO: deduplicate sources and base_tables
+        # TODO: deduplicate sources
         self.sources = sources or []
-        self.base_tables = list(base_tables or [self])
         self.dependents = []
         self.update = None
         self.result = None
@@ -226,10 +225,6 @@ class DataFrame(BaseThunk):
 
             # Store columns
             self.columns = df.columns
-
-    @property
-    def is_base_table(self):
-        return len(self.base_tables) == 1 and self.base_tables[0] is self
 
     def require_result(func):  # noqa
         '''Decorator for functions that require results to be ready'''
@@ -295,7 +290,7 @@ class DataFrame(BaseThunk):
 
         # Create a new DataFrame (which will become self), and add old
         # as a source, tracking the update that is being done
-        new = DataFrame(sources=[old], base_tables=old.base_tables)
+        new = DataFrame(sources=[old])
         new.update = Update(old, new, col, value)
 
         # If column is new, add it to columns
@@ -412,8 +407,7 @@ class Projection(DataFrame, ArithmeticOperand):
             raise TypeError('col must be of type str or list, but found {}'
                             .format(type(col)))
 
-        super().__init__(name=name, sources=[source],
-                         base_tables=source.base_tables)
+        super().__init__(name=name, sources=[source])
 
         if len(pd.Index(cols).difference(source.columns)) > 0:
             raise ValueError("Projection columns {} are not a subset of {}"
@@ -429,8 +423,7 @@ class Projection(DataFrame, ArithmeticOperand):
 
 class Selection(DataFrame):
     def __init__(self, source: DataFrame, criterion: Criterion, name=None):
-        super().__init__(name=name, sources=[source],
-                         base_tables=source.base_tables)
+        super().__init__(name=name, sources=[source])
         self.criterion = criterion
         self.columns = source.columns
 
@@ -441,8 +434,7 @@ class Selection(DataFrame):
 class OrderBy(DataFrame):
     def __init__(self, source: DataFrame, cols, ascending=True, name=None):
 
-        super().__init__(name=name, sources=[source],
-                         base_tables=source.base_tables)
+        super().__init__(name=name, sources=[source])
         if isinstance(cols, str):
             cols = [cols]
         if isinstance(ascending, bool):
@@ -469,9 +461,7 @@ class OrderBy(DataFrame):
 class Join(DataFrame):
     def __init__(self, source_1: DataFrame, source_2: DataFrame,
                  join_keys, name=None):
-        super().__init__(name=name, sources=[source_1, source_2],
-                         base_tables=source_1.base_tables +
-                         source_2.base_tables)
+        super().__init__(name=name, sources=[source_1, source_2])
         if isinstance(join_keys, str):
             join_keys = [join_keys]
         self.join_keys = join_keys
@@ -492,8 +482,7 @@ class Join(DataFrame):
 
 class Union(DataFrame):
     def __init__(self, sources: List[DataFrame], name=None):
-        base_tables = list({base for s in sources for base in s.base_tables})
-        super().__init__(name=name, sources=sources, base_tables=base_tables)
+        super().__init__(name=name, sources=sources)
 
         self.columns = pd.Index([])
         schema = sources[0].columns
@@ -510,8 +499,7 @@ class Union(DataFrame):
 class Limit(DataFrame):
     def __init__(self, source: DataFrame, n: int, name=None):
 
-        super().__init__(name=name, sources=[source],
-                         base_tables=source.base_tables)
+        super().__init__(name=name, sources=[source])
         self.n = n
         self.columns = source.columns
 
@@ -594,24 +582,21 @@ class Arithmetic(DataFrame, ArithmeticOperand):
     def __init__(self, operation, operand_1, operand_2=None, inline=False,
                  name=None):
 
-        base_tables = []
         sources = []
 
         self.operand_1 = _make_projection_or_constant(operand_1, simple=True)
         if isinstance(self.operand_1, DataFrame):
-            base_tables += self.operand_1.base_tables
             sources += self.operand_1.sources
 
         if operand_2 is not None:
             self.operand_2 = _make_projection_or_constant(operand_2,
                                                           simple=True)
             if isinstance(self.operand_2, DataFrame):
-                base_tables += self.operand_2.base_tables
                 sources += self.operand_2.sources
 
         self.unary = operand_2 is None
 
-        super().__init__(name=name, sources=sources, base_tables=base_tables)
+        super().__init__(name=name, sources=sources)
 
         self.operation = operation
         self.inline = inline
