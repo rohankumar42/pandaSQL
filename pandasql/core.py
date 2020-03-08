@@ -48,10 +48,10 @@ class Criterion(BaseThunk):
         # Simple criteria depend on comparisons between columns and/or
         # constants, whereas compound criteria depend on smaller criteria
         if simple:
-            assert(isinstance(source_1, Projection) or
+            assert(isinstance(source_1, ArithmeticOperand) or
                    isinstance(source_1, Constant))
             if source_2 is not None:
-                assert(isinstance(source_2, Projection) or
+                assert(isinstance(source_2, ArithmeticOperand) or
                        isinstance(source_2, Constant))
         else:
             assert(isinstance(source_1, Criterion))
@@ -87,10 +87,10 @@ class Criterion(BaseThunk):
             if len(source.columns) > 1:
                 attrs = '({})'.format(attrs)
             return attrs
-
+        elif isinstance(source, Arithmetic):
+            return source._operation_as_str()
         elif isinstance(source, Constant) or isinstance(source, Criterion):
             return str(source)
-
         else:
             raise TypeError("Unexpected source type {}".format(type(source)))
 
@@ -165,13 +165,35 @@ class ArithmeticOperand(object):
     def __abs__(self):
         return Abs(self)
 
+    def __eq__(self, other):
+        return self.__comparison(other, Equal)
+
+    def __ne__(self, other):
+        return self.__comparison(other, NotEqual)
+
+    def __lt__(self, other):
+        return self.__comparison(other, LessThan)
+
+    def __le__(self, other):
+        return self.__comparison(other, LessThanOrEqual)
+
+    def __gt__(self, other):
+        return self.__comparison(other, GreaterThan)
+
+    def __ge__(self, other):
+        return self.__comparison(other, GreaterThanOrEqual)
+
+    def __comparison(self, other, how_class):
+        # TODO: move the _make call into Criterion.__init__
+        return how_class(self, _make_projection_or_constant(other))
+
 
 class DataFrame(BaseThunk):
     def __init__(self, data=None, name=None, sources=None, base_tables=None):
         super().__init__(name=name)
         # TODO: deduplicate sources and base_tables
         self.sources = sources or []
-        self.base_tables = base_tables or [self]
+        self.base_tables = list(base_tables or [self])
         self.dependents = []
         self.update = None
         self.result = None
@@ -400,28 +422,6 @@ class Projection(DataFrame, ArithmeticOperand):
 
         self._sql_query = 'SELECT {} FROM {}'.format(', '.join(self.columns),
                                                      self.sources[0].name)
-
-    def __eq__(self, other):
-        return self.__comparison(other, Equal)
-
-    def __ne__(self, other):
-        return self.__comparison(other, NotEqual)
-
-    def __lt__(self, other):
-        return self.__comparison(other, LessThan)
-
-    def __le__(self, other):
-        return self.__comparison(other, LessThanOrEqual)
-
-    def __gt__(self, other):
-        return self.__comparison(other, GreaterThan)
-
-    def __ge__(self, other):
-        return self.__comparison(other, GreaterThanOrEqual)
-
-    def __comparison(self, other, how_class):
-        # TODO: move the _make call into Criterion.__init__
-        return how_class(self, _make_projection_or_constant(other))
 
     def __hash__(self):
         return super().__hash__()
@@ -719,7 +719,7 @@ def _define_dependencies(df: DataFrame):
     common_table_exprs = [
         '{} AS ({})'.format(t.name, t.sql(dependencies=False))
         for t in ordered_deps
-        if not t.is_base_table and t is not df and t.result is None
+        if t is not df and t.result is None
     ]
 
     if len(common_table_exprs) > 0:
