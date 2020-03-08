@@ -72,6 +72,34 @@ def join_select(module, authors, books, n=None, **kwargs):
     return sel
 
 
+def big_join_select(module, authors, books, n=None, **kwargs):
+    assert(isinstance(authors, module.DataFrame))
+    assert(isinstance(books, module.DataFrame))
+
+    authors = authors[['birth_day', 'birth_month',
+                       'birth_year', 'bio', 'country']]
+    if module is pandas:  # Suppress warning about writing to slice
+        authors = pandas.DataFrame(authors)
+    authors['dummy'] = 1
+    books['dummy'] = 1
+
+    merged = module.merge(books, authors, on='dummy')
+    merged["age"] = merged["publication_year"] - merged["birth_year"]
+
+    if module is dd:
+        merged = dask.delayed(merged)
+
+    sel = merged[merged["age"] > 115]
+
+    if n is not None:
+        sel = sel.head(n=n)
+    if module is dd:
+        sel = dask.compute(sel)[0]
+
+    str(sel)
+    return sel
+
+
 def join(module, authors, books, n=None, **kwargs):
     assert(isinstance(authors, module.DataFrame))
     assert(isinstance(books, module.DataFrame))
