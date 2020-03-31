@@ -512,7 +512,7 @@ class Limit(DataFrame):
 ##############################################################################
 
 
-def merge(left, right, on=None):
+def merge(left: DataFrame, right: DataFrame, on=None):
     """TODO: support other pandas join arguments"""
     return Join(left, right, on)
 
