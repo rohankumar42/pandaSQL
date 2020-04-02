@@ -1,6 +1,11 @@
 import sqlite3
 
 
+##############################################################################
+#                           Custom Arithmetic
+##############################################################################
+
+
 def mod(x: int, y: int):
     """Mod with Python/Pandas semantics instead of the SQLite's %"""
     return x % y
@@ -43,10 +48,56 @@ CUSTOM_FUNCTIONS = {
 }
 
 
+##############################################################################
+#                           Custom Aggregators
+##############################################################################
+
+
+class Fold:
+    def __init__(self, func, base):
+        self.result = base
+        self.func = func
+
+    def step(self, item):
+        self.result = self.func(self.result, item)
+
+    def finalize(self):
+        return self.result
+
+
+class Prod(Fold):
+    def __init__(self):
+        super().__init__(func=lambda x, y: x * y, base=1)
+
+
+class Any(Fold):
+    def __init__(self):
+        super().__init__(func=lambda x, y: x or y, base=False)
+
+
+class All(Fold):
+    def __init__(self):
+        super().__init__(func=lambda x, y: x and y, base=True)
+
+
+CUSTOM_AGGREGATORS = {
+    "PROD": (Prod, 1),
+    "AGG_ANY": (Any, 1),
+    "AGG_ALL": (All, 1),
+}
+
+
+##############################################################################
+#                           SQL Connection Utils
+##############################################################################
+
 def get_sqlite_connection():
     con = sqlite3.connect(":memory:")
 
     for name, (func, num_args) in CUSTOM_FUNCTIONS.items():
         con.create_function(name, num_args, func)
+
+    for name, (cls, num_args) in CUSTOM_AGGREGATORS.items():
+        con.create_aggregate(name, num_args, cls)
 
     return con

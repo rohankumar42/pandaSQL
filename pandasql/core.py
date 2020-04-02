@@ -252,6 +252,30 @@ class BaseFrame(BaseThunk):
 
         return ' '.join(query)
 
+    def sum(self):
+        return Aggregator('SUM', self)
+
+    def mean(self):
+        return Aggregator('AVG', self)
+
+    def count(self):
+        return Aggregator('COUNT', self)
+
+    def min(self):
+        return Aggregator('MIN', self)
+
+    def max(self):
+        return Aggregator('MAX', self)
+
+    def prod(self):
+        return Aggregator('PROD', self)
+
+    def any(self):
+        return Aggregator('AGG_ANY', self)
+
+    def all(self):
+        return Aggregator('AGG_ALL', self)
+
     def __hash__(self):
         return super().__hash__()
 
@@ -336,9 +360,6 @@ class DataFrame(BaseFrame):
     def groupby(self, by, as_index=False):
         """TODO: support other pandas groupby arguments"""
         return GroupByDataFrame(self, by=by, as_index=as_index)
-
-    def sum(self):
-        return Aggregator('SUM', self)
 
     @require_result
     def __str__(self):
@@ -565,9 +586,6 @@ class GroupByDataFrame(BaseFrame):
         return 'GroupBy({}, by={})'.format(self.sources[0].name,
                                            self.groupby_cols)
 
-    def sum(self):
-        return Aggregator('SUM', self)
-
 
 class GroupByProjection(GroupByDataFrame):
     def __init__(self, source: GroupByDataFrame, col, name=None):
@@ -600,7 +618,8 @@ class GroupByProjection(GroupByDataFrame):
 
 
 class Aggregator(DataFrame):
-    VALID_AGGREGATORS = ['SUM']
+    VALID_AGGREGATORS = ['SUM', 'COUNT', 'AVG', 'MIN', 'MAX',
+                         'PROD', 'AGG_ANY', 'AGG_ALL']
 
     def __init__(self, agg, source: BaseFrame, name=None):
         super().__init__(sources=[source], name=name)
@@ -628,20 +647,36 @@ class Aggregator(DataFrame):
 
         self.columns = source.columns
 
+        # Set return types in cases where explicit conversion is needed,
+        # e.g., bool because SQLite doesn't have bools
+        if agg in ['AGG_ANY', 'AGG_ALL']:
+            self.final_type = bool
+        else:
+            self.final_type = None
+
     def post_process_result(self, result):
         '''This function will be called by BaseFrame.compute'''
         if self.grouped and self.sources[0].as_index:
             # Add index to the computed Pandas DataFrame, like Pandas would
-            return result.set_index(self.sources[0].groupby_cols)
+            ret = result.set_index(self.sources[0].groupby_cols)
         elif len(result) == 1:
             series = result.iloc[0]
             if len(series) == 1:    # Single numerical value
-                return series[0]
+                ret = series[0]
             else:                   # Multiple numerical values
                 series.name = None
-                return series
+                ret = series
         else:
-            return result
+            ret = result
+
+        # Type cast if necessary
+        if self.final_type is not None:
+            if isinstance(ret, pd.DataFrame) or isinstance(ret, pd.Series):
+                ret = ret.astype(self.final_type)
+            else:
+                ret = self.final_type(ret)
+
+        return ret
 
 
 ##############################################################################

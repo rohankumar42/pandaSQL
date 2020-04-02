@@ -384,6 +384,19 @@ class TestDataFrame(unittest.TestCase):
         # Compare ints
         self.assertEqual(res.compute(), base_res)
 
+    def test_aggregation_operations(self):
+        base_df = pd.DataFrame([{'m': i, 'n': 10-i} for i in range(0, 10)])
+        df = ps.DataFrame(base_df)
+
+        self.assertDataFrameEqualsPandas(df.sum(), base_df.sum())
+        self.assertDataFrameEqualsPandas(df.mean(), base_df.mean())
+        self.assertDataFrameEqualsPandas(df.count(), base_df.count())
+        self.assertDataFrameEqualsPandas(df.min(), base_df.min())
+        self.assertDataFrameEqualsPandas(df.max(), base_df.max())
+        self.assertDataFrameEqualsPandas(df.prod(), base_df.prod())
+        self.assertDataFrameEqualsPandas(df.any(), base_df.any())
+        self.assertDataFrameEqualsPandas(df.all(), base_df.all())
+
     def test_simple_groupby_sum(self):
         base_df = pd.DataFrame([
             {'a': str(i), 'b': str(j), 'c': 100*i, 'd': -j}
