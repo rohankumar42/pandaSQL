@@ -188,20 +188,72 @@ class ArithmeticOperand(object):
         return how_class(self, _make_projection_or_constant(other))
 
 
-class DataFrame(BaseThunk):
-    def __init__(self, data=None, name=None, sources=None):
+def require_result(func):
+    '''Decorator for functions that require results to be ready'''
+
+    def result_ensured(self, *args, **kwargs):
+        self.compute()
+        return func(self, *args, **kwargs)
+
+    return result_ensured
+
+
+class BaseFrame(BaseThunk):
+    def __init__(self, name=None, sources=None):
         super().__init__(name=name)
         # TODO: deduplicate sources
         self.sources = sources or []
         self.dependents = []
-        self.update = None
         self.result = None
-        self.columns = None
-        df = None
+        self.update = None
+        self.columns = pd.Index([])
+        self._sql_query = None
 
         # For each source, add this as a dependent
         for source in self.sources:
             source.dependents.append(self)
+
+    def compute(self):
+
+        if self.result is None:
+            # Compute result and store in SQLite table
+            query = self.sql(dependencies=True)
+            compute_query = 'CREATE TABLE {} AS {}'.format(self.name, query)
+            SQL_CON.execute(compute_query)
+
+            # Read table as Pandas DataFrame
+            read_query = 'SELECT * FROM {}'.format(self.name)
+            self.result = pd.read_sql_query(read_query, con=SQL_CON)
+            self.columns = self.result.columns
+
+            if hasattr(self, 'post_process_result'):
+                self.result = self.post_process_result(self.result)
+
+        return self.result
+
+    def sql(self, dependencies=True):
+        query = []
+
+        if dependencies:
+            common_table_expr = _define_dependencies(self)
+            if common_table_expr is not None:
+                query.append(common_table_expr)
+
+        if self.update is None:
+            query.append(self._sql_query)
+        else:
+            query.append(self.update._sql_query)
+
+        return ' '.join(query)
+
+    def __hash__(self):
+        return super().__hash__()
+
+
+class DataFrame(BaseFrame):
+    def __init__(self, data=None, name=None, sources=None):
+        super().__init__(name=name, sources=sources)
+        df = None
 
         # If data provided, result is already ready
         if isinstance(data, dict) or isinstance(data, list):
@@ -225,45 +277,6 @@ class DataFrame(BaseThunk):
 
             # Store columns
             self.columns = df.columns
-
-    def require_result(func):  # noqa
-        '''Decorator for functions that require results to be ready'''
-
-        def result_ensured(self, *args, **kwargs):
-            self.compute()
-            return func(self, *args, **kwargs)
-
-        return result_ensured
-
-    def compute(self):
-
-        if self.result is None:
-            # Compute result and store in SQLite table
-            query = self.sql(dependencies=True)
-            compute_query = 'CREATE TABLE {} AS {}'.format(self.name, query)
-            SQL_CON.execute(compute_query)
-
-            # Read table as Pandas DataFrame
-            read_query = 'SELECT * FROM {}'.format(self.name)
-            self.result = pd.read_sql_query(read_query, con=SQL_CON)
-            self.columns = self.result.columns
-
-        return self.result
-
-    def sql(self, dependencies=True):
-        query = []
-
-        if dependencies:
-            common_table_expr = _define_dependencies(self)
-            if common_table_expr is not None:
-                query.append(common_table_expr)
-
-        if self.update is None:
-            query.append(self._sql_query)
-        else:
-            query.append(self.update._sql_query)
-
-        return ' '.join(query)
 
     def __getitem__(self, x):
         if isinstance(x, str) or isinstance(x, list):
@@ -313,6 +326,13 @@ class DataFrame(BaseThunk):
             raise NotImplementedError('Joins without key(s) are not supported')
         else:
             return Join(self, other, on)
+
+    def groupby(self, by, as_index=True):
+        """TODO: support other pandas groupby arguments"""
+        return GroupByDataFrame(self, by=by, as_index=as_index)
+
+    def sum(self):
+        return Aggregator('SUM', self)
 
     @require_result
     def __str__(self):
@@ -505,6 +525,75 @@ class Limit(DataFrame):
 
         self._sql_query = 'SELECT * FROM {} LIMIT {}'.format(
             self.sources[0].name, self.n)
+
+
+##############################################################################
+#                           GroupBy Operations
+##############################################################################
+
+class GroupByDataFrame(BaseFrame):
+    def __init__(self, source: DataFrame, by, as_index=True, name=None):
+
+        if isinstance(by, str):
+            self.groupby_cols = [by]
+        elif isinstance(by, list):
+            self.groupby_cols = by
+        else:
+            raise TypeError('by must be of type str or list, but found {}'
+                            .format(type(by)))
+
+        super().__init__(name=name, sources=[source])
+        self.base_name = source.name
+        self.columns = source.columns
+        self.as_index = as_index
+
+    def sum(self):
+        return Aggregator('SUM', self)
+
+    def __str__(self):
+        return f'GroupBy({self.sources[0].name}, {self.groupby_cols})'
+
+
+##############################################################################
+#                                Aggregators
+##############################################################################
+
+class Aggregator(DataFrame):
+    VALID_AGGREGATORS = ['SUM']
+
+    def __init__(self, agg, source: BaseFrame, name=None):
+        super().__init__(sources=[source], name=name)
+
+        assert(agg in self.VALID_AGGREGATORS)
+        self.agg = agg
+        self.grouped = isinstance(source, GroupByDataFrame)
+
+        # TODO: only use valid columns for aggregation operation
+        cols = ['{}({}) AS {}'.format(agg, c, c)
+                for c in source.columns]
+
+        if not self.grouped:
+            self._sql_query = 'SELECT {} FROM {}'.format(', '.join(cols),
+                                                         source.name)
+        else:
+            cols = list(source.groupby_cols)
+            cols += ['{}({}) AS {}'.format(agg, c, c)
+                     for c in source.columns
+                     if c not in source.groupby_cols]
+
+            self._sql_query = 'SELECT {} FROM {} GROUP BY {}' \
+                .format(', '.join(cols), source.base_name,
+                        ', '.join(source.groupby_cols))
+
+        self.columns = source.columns
+
+    def post_process_result(self, result):
+        '''This function will be called by BaseFrame.compute'''
+        if self.grouped and self.sources[0].as_index:
+            # Add index to the computed Pandas DataFrame, like Pandas would
+            return result.set_index(self.sources[0].groupby_cols)
+        else:
+            return result
 
 
 ##############################################################################
@@ -701,10 +790,14 @@ def _define_dependencies(df: DataFrame):
     graph = _get_dependency_graph(df)
     ordered_deps = _topological_sort(graph)
 
+    # Do NOT define a dependency t if any of the following is true:
+    #   (1) t is the current df
+    #   (2) t.result is not None (result cached)
+    #   (3) t is a GroupByDataFrame object
     common_table_exprs = [
         '{} AS ({})'.format(t.name, t.sql(dependencies=False))
         for t in ordered_deps
-        if t is not df and t.result is None
+        if t is not df and t.result is None and isinstance(t, DataFrame)
     ]
 
     if len(common_table_exprs) > 0:

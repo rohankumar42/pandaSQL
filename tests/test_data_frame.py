@@ -2,7 +2,8 @@ import unittest
 
 import pandas as pd
 import pandasql as ps
-from pandasql.core import Selection, Projection, Union, Join, Limit, OrderBy
+from pandasql.core import Selection, Projection, Union, Join, Limit, OrderBy, \
+    Aggregator, GroupByDataFrame
 
 
 class TestDataFrame(unittest.TestCase):
@@ -155,7 +156,7 @@ class TestDataFrame(unittest.TestCase):
         expected = base_df_1.merge(base_df_2, on='n')
         self.assertDataFrameEqualsPandas(merged, expected)
 
-    def test_merg_with_dependencies(self):
+    def test_merge_with_dependencies(self):
         base_df_1 = pd.DataFrame([{'n': i, 's1': str(i*2)} for i in range(10)])
         base_df_2 = pd.DataFrame([{'n': i, 's2': str(i*2)} for i in range(10)])
         T1 = ps.DataFrame(base_df_1)
@@ -356,6 +357,76 @@ class TestDataFrame(unittest.TestCase):
         expected['res'] = base_res
 
         self.assertDataFrameEqualsPandas(res, expected)
+
+    def test_column_sums(self):
+        base_df = pd.DataFrame([{'m': i, 'n': 10-i} for i in range(1, 11)])
+        df = ps.DataFrame(base_df)
+
+        res = df.sum()
+        base_res = base_df.sum()
+
+        self.assertIsInstance(res, Aggregator)
+        self.assertEqual(res.sql(), 'SELECT SUM(m) AS m, SUM(n) AS n FROM {}'
+                         .format(df.name))
+
+        # TODO: Convert Pandas Series to DataFrame for comparison because we
+        # currently don't return Series objects
+        base_res = pd.DataFrame().append(base_res, ignore_index=True)
+        self.assertDataFrameEqualsPandas(res, base_res.astype(int))
+
+        res = df['n'].sum()
+        base_res = base_df['n'].sum()
+        # TODO: Pandas returns the sum of a column as a float/int,
+        # which we do not currently support
+        base_res = pd.DataFrame([{'n': base_res}])
+        self.assertDataFrameEqualsPandas(res, base_res)
+
+    def test_simple_groupby_sum(self):
+        base_df = pd.DataFrame([
+            {'a': str(i), 'b': str(j), 'c': 100*i, 'd': -j}
+            for i in range(3) for j in range(3)
+        ])
+        df = ps.DataFrame(base_df)
+
+        grouped = df.groupby(['a', 'b'])
+        base_grouped = base_df.groupby(['a', 'b'])
+
+        res = grouped.sum()
+        base_res = base_grouped.sum()
+
+        self.assertIsInstance(grouped, GroupByDataFrame)
+        self.assertIsInstance(res, Aggregator)
+        self.assertEqual(res.sql(), 'SELECT a, b, SUM(c) AS c, SUM(d) AS d '
+                         'FROM {} GROUP BY a, b'.format(df.name))
+
+        base_res = pd.DataFrame().append(base_res, ignore_index=True)
+        self.assertDataFrameEqualsPandas(res, base_res.astype(int))
+
+        # Test without as_index=True
+        res = df.groupby(['a', 'b'], as_index=False).sum()
+        base_res = base_df.groupby(['a', 'b'], as_index=False).sum()
+
+        base_res = pd.DataFrame().append(base_res, ignore_index=True)
+        self.assertDataFrameEqualsPandas(res, base_res)
+
+    def test_groupby_further_usage(self):
+        base_df = pd.DataFrame([{'r': i // 3, 'n': i, 'm': 2*i}
+                                for i in range(1, 9)])
+        df = ps.DataFrame(base_df)
+
+        # TODO: as_index=True does not work because indexes are not
+        # currently synchronized with SQLite
+        agg = df.groupby('r', as_index=False).sum()
+        base_agg = base_df.groupby('r', as_index=False).sum()
+
+        res = agg[agg['n'] > 10]
+        base_res = base_agg[base_agg['n'] > 10]
+
+        self.assertEqual(res.sql(), 'WITH {} AS ({}) '
+                         'SELECT * FROM {} WHERE {}.n > 10'
+                         .format(agg.name, agg.sql(), agg.name, agg.name))
+
+        self.assertDataFrameEqualsPandas(res, base_res)
 
 
 if __name__ == "__main__":
