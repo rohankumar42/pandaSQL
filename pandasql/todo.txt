@@ -23,8 +23,8 @@
 * df.sort_values(...)                               # done
 * pd.concat([df1, df2, ..., dfn])                   # done
 * pd.DataFrame.columns                              # done
-* aggregations
-    * .sum()
+* pd.DataFrame.groupby                              # started
+    * and aggregations                              # started
 * column/Series operations
     * +/-/* etc.                                    # done
     * df['x'] = df['a']                             # done
@@ -32,7 +32,8 @@
     * df['a'] += 1                                  # done
     * df['a'] |= 1                                  # done
     * df['a'] = 2 % (df['b'] + 2 ** df['c'])        # done
-    * aggregations for a column
+    * aggregations for a columns                    # started
+        * .sum(), etc.
 * Data Manipulation (updates/writes)
     * .replace(...)
     * 
