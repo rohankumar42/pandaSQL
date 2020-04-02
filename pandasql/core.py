@@ -204,7 +204,7 @@ class BaseFrame(BaseThunk):
         # TODO: deduplicate sources
         self.sources = sources or []
         self.dependents = []
-        self.result = None
+        self._cached_result = None
         self.update = None
         self.columns = pd.Index([])
         self._sql_query = None
@@ -215,7 +215,7 @@ class BaseFrame(BaseThunk):
 
     def compute(self):
 
-        if self.result is None:
+        if self._cached_result is None:
             # Compute result and store in SQLite table
             query = self.sql(dependencies=True)
             compute_query = 'CREATE TABLE {} AS {}'.format(self.name, query)
@@ -223,13 +223,19 @@ class BaseFrame(BaseThunk):
 
             # Read table as Pandas DataFrame
             read_query = 'SELECT * FROM {}'.format(self.name)
-            self.result = pd.read_sql_query(read_query, con=SQL_CON)
-            self.columns = self.result.columns
-
-            if hasattr(self, 'post_process_result'):
-                self.result = self.post_process_result(self.result)
+            self._cached_result = pd.read_sql_query(read_query, con=SQL_CON)
+            self.columns = self._cached_result.columns
 
         return self.result
+
+    @property
+    def result(self):
+        if self._cached_result is None:
+            return None
+        elif hasattr(self, 'post_process_result'):
+            return self.post_process_result(self._cached_result)
+        else:
+            return self._cached_result
 
     def sql(self, dependencies=True):
         query = []
@@ -258,13 +264,13 @@ class DataFrame(BaseFrame):
         # If data provided, result is already ready
         if isinstance(data, dict) or isinstance(data, list):
             df = pd.DataFrame(data)
-            self.result = df
+            self._cached_result = df
         elif isinstance(data, pd.DataFrame):
             df = data
-            self.result = df
+            self._cached_result = df
         elif isinstance(data, DataFrame):
             df = data.compute()
-            self.result = df
+            self._cached_result = df
         elif data is None:
             pass
         else:
@@ -556,7 +562,8 @@ class GroupByDataFrame(BaseFrame):
             raise TypeError('Unsupported indexing type {}'.format(type(x)))
 
     def __str__(self):
-        return f'GroupBy({self.sources[0].name}, {self.groupby_cols})'
+        return 'GroupBy({}, by={})'.format(self.sources[0].name,
+                                           self.groupby_cols)
 
     def sum(self):
         return Aggregator('SUM', self)
@@ -580,6 +587,11 @@ class GroupByProjection(GroupByDataFrame):
             raise ValueError("Projection columns {} are not a subset of {}"
                              .format(cols, source.columns))
         self.columns = source.columns[source.columns.isin(cols)]
+
+    def __str__(self):
+        return 'GroupByProjection({}, by={}, cols={})' \
+            .format(self.sources[0].name, self.groupby_cols,
+                    self.columns.to_list())
 
 
 ##############################################################################
@@ -621,6 +633,13 @@ class Aggregator(DataFrame):
         if self.grouped and self.sources[0].as_index:
             # Add index to the computed Pandas DataFrame, like Pandas would
             return result.set_index(self.sources[0].groupby_cols)
+        elif len(result) == 1:
+            series = result.iloc[0]
+            if len(series) == 1:    # Single numerical value
+                return series[0]
+            else:                   # Multiple numerical values
+                series.name = None
+                return series
         else:
             return result
 

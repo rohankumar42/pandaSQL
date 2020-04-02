@@ -19,8 +19,14 @@ class TestDataFrame(unittest.TestCase):
         result.reset_index(drop=True, inplace=True)
         expected_df.reset_index(drop=True, inplace=True)
 
-        pd.testing.assert_frame_equal(result, expected_df,
-                                      *args, **kwargs)
+        if isinstance(expected_df, pd.DataFrame):
+            pd.testing.assert_frame_equal(result, expected_df,
+                                          *args, **kwargs)
+        elif isinstance(expected_df, pd.Series):
+            pd.testing.assert_series_equal(result, expected_df,
+                                           *args, **kwargs)
+        else:
+            raise TypeError("Unexpected type {}".format(type(expected_df)))
 
     def test_simple_projection(self):
         base_df = pd.DataFrame([{'n': i, 's': str(i*2)} for i in range(10)])
@@ -369,17 +375,14 @@ class TestDataFrame(unittest.TestCase):
         self.assertEqual(res.sql(), 'SELECT SUM(m) AS m, SUM(n) AS n FROM {}'
                          .format(df.name))
 
-        # TODO: Convert Pandas Series to DataFrame for comparison because we
-        # currently don't return Series objects
-        base_res = pd.DataFrame().append(base_res, ignore_index=True)
+        # Compare Pandas series
         self.assertDataFrameEqualsPandas(res, base_res.astype(int))
 
         res = df['n'].sum()
         base_res = base_df['n'].sum()
-        # TODO: Pandas returns the sum of a column as a float/int,
-        # which we do not currently support
-        base_res = pd.DataFrame([{'n': base_res}])
-        self.assertDataFrameEqualsPandas(res, base_res)
+
+        # Compare ints
+        self.assertEqual(res.compute(), base_res)
 
     def test_simple_groupby_sum(self):
         base_df = pd.DataFrame([
