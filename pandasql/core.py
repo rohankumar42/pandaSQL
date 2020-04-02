@@ -901,3 +901,7 @@ def _make_projection_or_constant(x, simple=False, arithmetic=True):
         return x
     else:
         raise TypeError('Only constants and Projections are accepted')
+
+
+def stop():
+    SQL_CON.close()
