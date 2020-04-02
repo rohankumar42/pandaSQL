@@ -327,7 +327,7 @@ class DataFrame(BaseFrame):
         else:
             return Join(self, other, on)
 
-    def groupby(self, by, as_index=True):
+    def groupby(self, by, as_index=False):
         """TODO: support other pandas groupby arguments"""
         return GroupByDataFrame(self, by=by, as_index=as_index)
 
@@ -532,7 +532,7 @@ class Limit(DataFrame):
 ##############################################################################
 
 class GroupByDataFrame(BaseFrame):
-    def __init__(self, source: DataFrame, by, as_index=True, name=None):
+    def __init__(self, source: DataFrame, by, as_index=False, name=None):
 
         if isinstance(by, str):
             self.groupby_cols = [by]
@@ -547,16 +547,45 @@ class GroupByDataFrame(BaseFrame):
         self.columns = source.columns
         self.as_index = as_index
 
-    def sum(self):
-        return Aggregator('SUM', self)
+    def __getitem__(self, x):
+        if isinstance(x, str) or isinstance(x, list):
+            return GroupByProjection(self, x)
+        elif isinstance(x, slice):
+            raise TypeError('Slicing not support for GroupBy objects')
+        else:
+            raise TypeError('Unsupported indexing type {}'.format(type(x)))
 
     def __str__(self):
         return f'GroupBy({self.sources[0].name}, {self.groupby_cols})'
+
+    def sum(self):
+        return Aggregator('SUM', self)
+
+
+class GroupByProjection(GroupByDataFrame):
+    def __init__(self, source: GroupByDataFrame, col, name=None):
+
+        if isinstance(col, str):
+            cols = [col]
+        elif isinstance(col, list):
+            cols = col
+        else:
+            raise TypeError('col must be of type str or list, but found {}'
+                            .format(type(col)))
+
+        super().__init__(source.sources[0], by=source.groupby_cols,
+                         as_index=source.as_index, name=name)
+
+        if len(pd.Index(cols).difference(source.columns)) > 0:
+            raise ValueError("Projection columns {} are not a subset of {}"
+                             .format(cols, source.columns))
+        self.columns = source.columns[source.columns.isin(cols)]
 
 
 ##############################################################################
 #                                Aggregators
 ##############################################################################
+
 
 class Aggregator(DataFrame):
     VALID_AGGREGATORS = ['SUM']

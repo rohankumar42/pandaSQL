@@ -3,7 +3,7 @@ import unittest
 import pandas as pd
 import pandasql as ps
 from pandasql.core import Selection, Projection, Union, Join, Limit, OrderBy, \
-    Aggregator, GroupByDataFrame
+    Aggregator, GroupByDataFrame, GroupByProjection
 
 
 class TestDataFrame(unittest.TestCase):
@@ -389,7 +389,7 @@ class TestDataFrame(unittest.TestCase):
         df = ps.DataFrame(base_df)
 
         grouped = df.groupby(['a', 'b'])
-        base_grouped = base_df.groupby(['a', 'b'])
+        base_grouped = base_df.groupby(['a', 'b'], as_index=False)
 
         res = grouped.sum()
         base_res = base_grouped.sum()
@@ -400,11 +400,25 @@ class TestDataFrame(unittest.TestCase):
                          'FROM {} GROUP BY a, b'.format(df.name))
 
         base_res = pd.DataFrame().append(base_res, ignore_index=True)
-        self.assertDataFrameEqualsPandas(res, base_res.astype(int))
+        self.assertDataFrameEqualsPandas(res, base_res)
 
-        # Test without as_index=True
-        res = df.groupby(['a', 'b'], as_index=False).sum()
-        base_res = base_df.groupby(['a', 'b'], as_index=False).sum()
+    def test_groupby_projection_sum(self):
+        base_df = pd.DataFrame([
+            {'a': str(i), 'b': str(j), 'c': 100*i, 'd': -j}
+            for i in range(3) for j in range(3)
+        ])
+        df = ps.DataFrame(base_df)
+
+        grouped = df.groupby(['a', 'b'])['c']
+        base_grouped = base_df.groupby(['a', 'b'], as_index=False)['c']
+
+        res = grouped.sum()
+        base_res = base_grouped.sum()
+
+        self.assertIsInstance(grouped, GroupByProjection)
+        self.assertIsInstance(res, Aggregator)
+        self.assertEqual(res.sql(), 'SELECT a, b, SUM(c) AS c '
+                         'FROM {} GROUP BY a, b'.format(df.name))
 
         base_res = pd.DataFrame().append(base_res, ignore_index=True)
         self.assertDataFrameEqualsPandas(res, base_res)
@@ -416,7 +430,7 @@ class TestDataFrame(unittest.TestCase):
 
         # TODO: as_index=True does not work because indexes are not
         # currently synchronized with SQLite
-        agg = df.groupby('r', as_index=False).sum()
+        agg = df.groupby('r').sum()
         base_agg = base_df.groupby('r', as_index=False).sum()
 
         res = agg[agg['n'] > 10]
