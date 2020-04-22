@@ -1,4 +1,3 @@
-# import uuid
 import pandas as pd
 from typing import List
 
@@ -6,7 +5,9 @@ from pandasql.utils import _is_supported_constant, _get_dependency_graph, \
     _topological_sort, _new_name
 from pandasql.sql_utils import get_sqlite_connection
 
+
 SQL_CON = get_sqlite_connection()
+OFFLOADING_STRATEGY = None
 
 
 class BaseThunk(object):
@@ -213,21 +214,6 @@ class BaseFrame(BaseThunk):
         for source in self.sources:
             source.dependents.append(self)
 
-    def compute(self):
-
-        if self._cached_result is None:
-            # Compute result and store in SQLite table
-            query = self.sql(dependencies=True)
-            compute_query = 'CREATE TABLE {} AS {}'.format(self.name, query)
-            SQL_CON.execute(compute_query)
-
-            # Read table as Pandas DataFrame
-            read_query = 'SELECT * FROM {}'.format(self.name)
-            self._cached_result = pd.read_sql_query(read_query, con=SQL_CON)
-            self.columns = self._cached_result.columns
-
-        return self.result
-
     @property
     def result(self):
         if self._cached_result is None:
@@ -236,6 +222,30 @@ class BaseFrame(BaseThunk):
             return self.post_process_result(self._cached_result)
         else:
             return self._cached_result
+
+    def compute(self):
+
+        if self._cached_result is None:
+            if should_offload_computation(self):
+                self._compute_sqlite()
+            else:
+                self._compute_pandas()
+
+        return self.result
+
+    def _compute_pandas(self):
+        raise NotImplementedError("To be implemented by subclasses")
+
+    def _compute_sqlite(self):
+        # Compute result and store in SQLite table
+        query = self.sql(dependencies=True)
+        compute_query = 'CREATE TABLE {} AS {}'.format(self.name, query)
+        SQL_CON.execute(compute_query)
+
+        # Read table as Pandas DataFrame
+        read_query = 'SELECT * FROM {}'.format(self.name)
+        self._cached_result = pd.read_sql_query(read_query, con=SQL_CON)
+        self.columns = self._cached_result.columns
 
     def sql(self, dependencies=True):
         query = []
@@ -862,6 +872,34 @@ class Invert(Arithmetic):
 class Abs(Arithmetic):
     def __init__(self, source, name=None):
         super().__init__('abs', source, name=name)
+
+
+##############################################################################
+#                       Offloading Decision Functions
+##############################################################################
+
+
+def offloading_strategy(name=None):
+    if name is not None:
+        name = name.upper()
+        if name not in ['ALWAYS', 'NEVER']:
+            raise ValueError(f'Unsupported offloading strategy: {name}')
+
+        global OFFLOADING_STRATEGY
+        OFFLOADING_STRATEGY = name
+
+    return OFFLOADING_STRATEGY
+
+
+def should_offload_computation(df: BaseFrame):
+    if OFFLOADING_STRATEGY == 'ALWAYS':
+        return True
+    elif OFFLOADING_STRATEGY == 'NEVER':
+        return False
+    else:
+        # TODO: put smart offloading logic here
+        raise NotImplementedError('Unsupported offloading strategy: {}'
+                                  .format(OFFLOADING_STRATEGY))
 
 
 ##############################################################################

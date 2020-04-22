@@ -4,29 +4,15 @@ import pandas as pd
 import pandasql as ps
 from pandasql.core import Selection, Projection, Union, Join, Limit, OrderBy, \
     Aggregator, GroupByDataFrame, GroupByProjection
+from utils import assertDataFrameEqualsPandas
 
 
 class TestDataFrame(unittest.TestCase):
     # TODO: refactor into multiple unit tests when there is enough
     # functionality to test
 
-    def assertDataFrameEqualsPandas(self, df: ps.DataFrame,
-                                    expected_df: pd.DataFrame,
-                                    *args, **kwargs):
-        result = df.compute()
-
-        # Ignore Pandas index for the comparison
-        result.reset_index(drop=True, inplace=True)
-        expected_df.reset_index(drop=True, inplace=True)
-
-        if isinstance(expected_df, pd.DataFrame):
-            pd.testing.assert_frame_equal(result, expected_df,
-                                          *args, **kwargs)
-        elif isinstance(expected_df, pd.Series):
-            pd.testing.assert_series_equal(result, expected_df,
-                                           *args, **kwargs)
-        else:
-            raise TypeError("Unexpected type {}".format(type(expected_df)))
+    def setUp(self):
+        ps.offloading_strategy('ALWAYS')
 
     def test_simple_projection(self):
         base_df = pd.DataFrame([{'n': i, 's': str(i*2)} for i in range(10)])
@@ -38,7 +24,7 @@ class TestDataFrame(unittest.TestCase):
         self.assertEqual(sql, 'SELECT n FROM {}'.format(df.name))
 
         expected = base_df[['n']]
-        self.assertDataFrameEqualsPandas(proj, expected)
+        assertDataFrameEqualsPandas(proj, expected)
 
     def test_multiple_projection(self):
         base_df = pd.DataFrame([{'n': i, 's': str(i*2)} for i in range(10)])
@@ -50,7 +36,7 @@ class TestDataFrame(unittest.TestCase):
         self.assertEqual(sql, 'SELECT n, s FROM {}'.format(df.name))
 
         expected = base_df[['n', 's']]
-        self.assertDataFrameEqualsPandas(proj, expected)
+        assertDataFrameEqualsPandas(proj, expected)
 
     def test_simple_selection(self):
         base_df = pd.DataFrame([{'n': i, 's': str(i*2)} for i in range(10)])
@@ -63,7 +49,7 @@ class TestDataFrame(unittest.TestCase):
                          .format(df.name, df.name))
 
         expected = base_df[base_df['n'] == 5]
-        self.assertDataFrameEqualsPandas(selection, expected)
+        assertDataFrameEqualsPandas(selection, expected)
 
     def test_nested_operation(self):
         base_df = pd.DataFrame([{'n': i, 's': str(i*2)} for i in range(10)])
@@ -77,7 +63,7 @@ class TestDataFrame(unittest.TestCase):
                                                    df.name, selection.name))
 
         expected = base_df[base_df['n'] == 5][['s']]
-        self.assertDataFrameEqualsPandas(proj, expected)
+        assertDataFrameEqualsPandas(proj, expected)
 
     def test_limit_after_selection(self):
         base_df = pd.DataFrame([{'n': i, 's': str(i*2)} for i in range(10)])
@@ -93,7 +79,7 @@ class TestDataFrame(unittest.TestCase):
                                  df.name, selection.name))
 
         expected = base_df[base_df['n'] != 0][:5]
-        self.assertDataFrameEqualsPandas(limit, expected)
+        assertDataFrameEqualsPandas(limit, expected)
 
         no_limit = selection[:]
 
@@ -102,7 +88,7 @@ class TestDataFrame(unittest.TestCase):
                          .format(df.name, df.name))
 
         expected = base_df[base_df['n'] != 0][:]
-        self.assertDataFrameEqualsPandas(no_limit, expected)
+        assertDataFrameEqualsPandas(no_limit, expected)
 
     def test_order_by(self):
         base_df = pd.DataFrame([{'x': i // 2, 'y': i % 2} for i in range(10)])
@@ -117,7 +103,7 @@ class TestDataFrame(unittest.TestCase):
                          .format(df.name, df.name))
 
         expected = base_df.sort_values('x', ascending=False)
-        self.assertDataFrameEqualsPandas(ordered, expected)
+        assertDataFrameEqualsPandas(ordered, expected)
 
         # Sort on multiple columns
         ordered = df.sort_values(['x', 'y'], ascending=[True, False])
@@ -126,7 +112,7 @@ class TestDataFrame(unittest.TestCase):
                          .format(df.name, df.name, df.name))
 
         expected = base_df.sort_values(['x', 'y'], ascending=[True, False])
-        self.assertDataFrameEqualsPandas(ordered, expected)
+        assertDataFrameEqualsPandas(ordered, expected)
 
     def test_simple_union(self):
         base_df_1 = pd.DataFrame([{'n': i, 's': str(i)} for i in range(8)])
@@ -145,7 +131,7 @@ class TestDataFrame(unittest.TestCase):
                          .format(df_1.name, df_2.name, df_3.name))
 
         expected = pd.concat([base_df_1, base_df_2, base_df_3])
-        self.assertDataFrameEqualsPandas(union, expected)
+        assertDataFrameEqualsPandas(union, expected)
 
     def test_simple_merge(self):
         base_df_1 = pd.DataFrame([{'n': i, 's1': str(i*2)} for i in range(10)])
@@ -160,7 +146,7 @@ class TestDataFrame(unittest.TestCase):
                          .format(df_1.name, df_2.name))
 
         expected = base_df_1.merge(base_df_2, on='n')
-        self.assertDataFrameEqualsPandas(merged, expected)
+        assertDataFrameEqualsPandas(merged, expected)
 
     def test_merge_with_dependencies(self):
         base_df_1 = pd.DataFrame([{'n': i, 's1': str(i*2)} for i in range(10)])
@@ -180,7 +166,7 @@ class TestDataFrame(unittest.TestCase):
 
         expected = base_df_1[base_df_1['n'] < 8].merge(
             base_df_2[base_df_2['n'] >= 3], on='n')
-        self.assertDataFrameEqualsPandas(merged, expected)
+        assertDataFrameEqualsPandas(merged, expected)
 
     def test_complex_criteria(self):
         base_df = pd.DataFrame([{'n': i, 's': str(i*2)} for i in range(10)])
@@ -199,13 +185,13 @@ class TestDataFrame(unittest.TestCase):
                          .format(T.name, T.name))
 
         conj_expected = base_df[(base_df['n'] > 2) & (base_df['n'] <= 6)]
-        self.assertDataFrameEqualsPandas(conj, conj_expected)
+        assertDataFrameEqualsPandas(conj, conj_expected)
 
         disj_expected = base_df[(base_df['n'] < 2) | (base_df['n'] >= 6)]
-        self.assertDataFrameEqualsPandas(disj, disj_expected)
+        assertDataFrameEqualsPandas(disj, disj_expected)
 
         neg_expected = base_df[~(base_df['s'] != '2')]
-        self.assertDataFrameEqualsPandas(neg, neg_expected)
+        assertDataFrameEqualsPandas(neg, neg_expected)
 
     def test_columns(self):
         df = pd.DataFrame([{'a': i, 'b': i*2, 'c': i-1} for i in range(10)])
@@ -253,7 +239,7 @@ class TestDataFrame(unittest.TestCase):
 
         expected = base_df_1[base_df_1['n'] < 8].merge(
             base_df_2[base_df_2['n'] >= 3], on='n')
-        self.assertDataFrameEqualsPandas(merged, expected)
+        assertDataFrameEqualsPandas(merged, expected)
 
     def test_duplicating_column(self):
         base_df = pd.DataFrame([{'n': i, 'a': str(i*2)} for i in range(10)])
@@ -264,7 +250,7 @@ class TestDataFrame(unittest.TestCase):
         base_df['b'] = base_df['a']
 
         pd.testing.assert_index_equal(df.columns, base_df.columns)
-        self.assertDataFrameEqualsPandas(df, base_df)
+        assertDataFrameEqualsPandas(df, base_df)
 
     def test_write_constant_column(self):
         base_df = pd.DataFrame([{'n': i, 'a': str(i*2)} for i in range(10)])
@@ -279,7 +265,7 @@ class TestDataFrame(unittest.TestCase):
         base_df['c'] = 'dummy'
 
         pd.testing.assert_index_equal(df.columns, base_df.columns)
-        self.assertDataFrameEqualsPandas(df, base_df)
+        assertDataFrameEqualsPandas(df, base_df)
 
     def test_write_on_downstream_dataframe(self):
         base_df = pd.DataFrame([{'n': i, 'a': str(i*2)} for i in range(10)])
@@ -296,7 +282,7 @@ class TestDataFrame(unittest.TestCase):
         expected['b'] = 10
 
         pd.testing.assert_index_equal(selection.columns, expected.columns)
-        self.assertDataFrameEqualsPandas(selection, expected)
+        assertDataFrameEqualsPandas(selection, expected)
 
     def test_old_dependents_after_write(self):
         base_df = pd.DataFrame([{'n': i, 'a': str(i*2)} for i in range(10)])
@@ -311,10 +297,10 @@ class TestDataFrame(unittest.TestCase):
 
         # df should have the updated column
         pd.testing.assert_index_equal(df.columns, base_df.columns)
-        self.assertDataFrameEqualsPandas(df, base_df)
+        assertDataFrameEqualsPandas(df, base_df)
 
         # But old_proj should have old values of column
-        self.assertDataFrameEqualsPandas(old_proj, expected_old_proj)
+        assertDataFrameEqualsPandas(old_proj, expected_old_proj)
 
     def test_simple_arithmetic_on_columns(self):
         base_df = pd.DataFrame([{'n': i, 'm': 10-i} for i in range(10)])
@@ -330,7 +316,7 @@ class TestDataFrame(unittest.TestCase):
         expected = pd.DataFrame()
         expected['res'] = base_res
 
-        self.assertDataFrameEqualsPandas(res, expected)
+        assertDataFrameEqualsPandas(res, expected)
 
     def test_complex_arithmetic_on_columns(self):
         base_df = pd.DataFrame([{'n': i, 'm': 10-i} for i in range(1, 11)])
@@ -346,7 +332,7 @@ class TestDataFrame(unittest.TestCase):
         expected = pd.DataFrame()
         expected['res'] = base_res
 
-        self.assertDataFrameEqualsPandas(res, expected)
+        assertDataFrameEqualsPandas(res, expected)
 
     def test_bitwise_operations_on_columns(self):
         base_df = pd.DataFrame([{'n': i, 'm': 10-i} for i in range(1, 11)])
@@ -362,7 +348,7 @@ class TestDataFrame(unittest.TestCase):
         expected = pd.DataFrame()
         expected['res'] = base_res
 
-        self.assertDataFrameEqualsPandas(res, expected)
+        assertDataFrameEqualsPandas(res, expected)
 
     def test_column_sums(self):
         base_df = pd.DataFrame([{'m': i, 'n': 10-i} for i in range(1, 11)])
@@ -376,7 +362,7 @@ class TestDataFrame(unittest.TestCase):
                          .format(df.name))
 
         # Compare Pandas series
-        self.assertDataFrameEqualsPandas(res, base_res.astype(int))
+        assertDataFrameEqualsPandas(res, base_res.astype(int))
 
         res = df['n'].sum()
         base_res = base_df['n'].sum()
@@ -388,14 +374,14 @@ class TestDataFrame(unittest.TestCase):
         base_df = pd.DataFrame([{'m': i, 'n': 10-i} for i in range(0, 10)])
         df = ps.DataFrame(base_df)
 
-        self.assertDataFrameEqualsPandas(df.sum(), base_df.sum())
-        self.assertDataFrameEqualsPandas(df.mean(), base_df.mean())
-        self.assertDataFrameEqualsPandas(df.count(), base_df.count())
-        self.assertDataFrameEqualsPandas(df.min(), base_df.min())
-        self.assertDataFrameEqualsPandas(df.max(), base_df.max())
-        self.assertDataFrameEqualsPandas(df.prod(), base_df.prod())
-        self.assertDataFrameEqualsPandas(df.any(), base_df.any())
-        self.assertDataFrameEqualsPandas(df.all(), base_df.all())
+        assertDataFrameEqualsPandas(df.sum(), base_df.sum())
+        assertDataFrameEqualsPandas(df.mean(), base_df.mean())
+        assertDataFrameEqualsPandas(df.count(), base_df.count())
+        assertDataFrameEqualsPandas(df.min(), base_df.min())
+        assertDataFrameEqualsPandas(df.max(), base_df.max())
+        assertDataFrameEqualsPandas(df.prod(), base_df.prod())
+        assertDataFrameEqualsPandas(df.any(), base_df.any())
+        assertDataFrameEqualsPandas(df.all(), base_df.all())
 
     def test_simple_groupby_sum(self):
         base_df = pd.DataFrame([
@@ -416,7 +402,7 @@ class TestDataFrame(unittest.TestCase):
                          'FROM {} GROUP BY a, b'.format(df.name))
 
         base_res = pd.DataFrame().append(base_res, ignore_index=True)
-        self.assertDataFrameEqualsPandas(res, base_res)
+        assertDataFrameEqualsPandas(res, base_res)
 
     def test_groupby_projection_sum(self):
         base_df = pd.DataFrame([
@@ -437,7 +423,7 @@ class TestDataFrame(unittest.TestCase):
                          'FROM {} GROUP BY a, b'.format(df.name))
 
         base_res = pd.DataFrame().append(base_res, ignore_index=True)
-        self.assertDataFrameEqualsPandas(res, base_res)
+        assertDataFrameEqualsPandas(res, base_res)
 
     def test_groupby_further_usage(self):
         base_df = pd.DataFrame([{'r': i // 3, 'n': i, 'm': 2*i}
@@ -456,7 +442,7 @@ class TestDataFrame(unittest.TestCase):
                          'SELECT * FROM {} WHERE {}.n > 10'
                          .format(agg.name, agg.sql(), agg.name, agg.name))
 
-        self.assertDataFrameEqualsPandas(res, base_res)
+        assertDataFrameEqualsPandas(res, base_res)
 
 
 if __name__ == "__main__":
