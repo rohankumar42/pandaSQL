@@ -10,14 +10,123 @@ SQL_CON = get_sqlite_connection()
 OFFLOADING_STRATEGY = None
 
 
-class BaseThunk(object):
-    def __init__(self, name=None):
+def require_result(func):
+    '''Decorator for functions that require results to be ready'''
+
+    def result_ensured(self, *args, **kwargs):
+        self.compute()
+        return func(self, *args, **kwargs)
+
+    return result_ensured
+
+
+class BaseFrame(object):
+    def __init__(self, name=None, sources=None):
         self.name = name or _new_name()
-        self.sources = []
+        # TODO: deduplicate sources
+        self.sources = sources or []
+        self.dependents = []
+        self._cached_result = None
+        self.update = None
+        self.columns = pd.Index([])
+        self._sql_query = None
+
+        # For each source, add this as a dependent
+        for source in self.sources:
+            source.dependents.append(self)
+
+    @property
+    def result(self):
+        if self._cached_result is None:
+            return None
+        elif hasattr(self, 'post_process_result'):
+            return self.post_process_result(self._cached_result)
+        else:
+            return self._cached_result
+
+    def compute(self):
+
+        if self._cached_result is None:
+            if should_offload_computation(self):
+                self._compute_sqlite()
+            else:
+                self._compute_pandas()
+
+        return self.result
+
+    def _compute_pandas(self):
+        if self._cached_result is None:
+            graph = _get_dependency_graph(self)
+            ordered_deps = _topological_sort(graph)
+
+            # Compute all dependencies in order (via Pandas)
+            # TODO: should GroupByDataFrame be excluded here too?
+            for t in ordered_deps:
+                if t is not self and t.result is None \
+                        and isinstance(t, BaseFrame):
+                    t._compute_pandas()
+
+            # Finally, compute this object's result
+            # TODO(important): when should this result be offloaded to SQLite?
+            self._cached_result = self._pandas()
+
+        return self.result
+
+    def _compute_sqlite(self):
+        if self._cached_result is None:
+            # Compute result and store in SQLite table
+            query = self.sql(dependencies=True)
+            compute_query = 'CREATE TABLE {} AS {}'.format(self.name, query)
+            SQL_CON.execute(compute_query)
+
+            # Read table as Pandas DataFrame
+            read_query = 'SELECT * FROM {}'.format(self.name)
+            self._cached_result = pd.read_sql_query(read_query, con=SQL_CON)
+            self.columns = self._cached_result.columns
+
+        return self.result
+
+    def _pandas(self):
+        raise NotImplementedError("To be implemented by subclasses")
 
     def sql(self, dependencies=True):
-        raise TypeError('Objects of type {} cannot be converted to a SQL query'
-                        .format(type(self)))
+        query = []
+
+        if dependencies:
+            common_table_expr = _define_dependencies(self)
+            if common_table_expr is not None:
+                query.append(common_table_expr)
+
+        if self.update is None:
+            query.append(self._sql_query)
+        else:
+            query.append(self.update._sql_query)
+
+        return ' '.join(query)
+
+    def sum(self):
+        return Aggregator('SUM', self)
+
+    def mean(self):
+        return Aggregator('AVG', self)
+
+    def count(self):
+        return Aggregator('COUNT', self)
+
+    def min(self):
+        return Aggregator('MIN', self)
+
+    def max(self):
+        return Aggregator('MAX', self)
+
+    def prod(self):
+        return Aggregator('PROD', self)
+
+    def any(self):
+        return Aggregator('AGG_ANY', self)
+
+    def all(self):
+        return Aggregator('AGG_ALL', self)
 
     def __str__(self):
         return self.name
@@ -29,22 +138,22 @@ class BaseThunk(object):
         return hash(self.name)
 
 
-class Constant(BaseThunk):
+class Constant(BaseFrame):
     def __init__(self, value, name=None):
         super().__init__(name=name)
         if not _is_supported_constant(value):
             raise TypeError('Unsupported type {}'.format(type(value)))
-        self.value = value
+        self._cached_result = value
 
     def __str__(self):
-        if isinstance(self.value, str):
-            return "'{}'".format(self.value)
+        if isinstance(self._cached_result, str):
+            return "'{}'".format(self._cached_result)
         else:
-            return str(self.value)
+            return str(self._cached_result)
 
 
-class Criterion(BaseThunk):
-    def __init__(self, operation, source_1, source_2=None,
+class Criterion(BaseFrame):
+    def __init__(self, operation, pandas_func, source_1, source_2=None,
                  name=None, simple=True):
         # Simple criteria depend on comparisons between columns and/or
         # constants, whereas compound criteria depend on smaller criteria
@@ -59,17 +168,29 @@ class Criterion(BaseThunk):
             if source_2 is not None:
                 assert(isinstance(source_2, Criterion))
 
-        super().__init__(name=name)
-        self.operation = operation
-        self.sources = [source_1]
-        if source_2 is not None:
-            self.sources.append(source_2)
+        assert(callable(pandas_func))
+        self._pandas_func = pandas_func
 
+        self.operation = operation
+        sources = [source_1]
+        if source_2 is not None:
+            sources.append(source_2)
+
+        super().__init__(name=name, sources=sources)
+
+    # TODO: put this in self.as_sql_criterion() and make __str__()
+    # actually compute like other BaseFrames
     def __str__(self):
         '''Default for binary Criterion objects'''
         return '{} {} {}'.format(self._source_to_str(self.sources[0]),
                                  self.operation,
                                  self._source_to_str(self.sources[1]))
+
+    def _pandas(self):
+        results = [s.result[s.columns[0]] if isinstance(s, Projection)
+                   else s.result for s in self.sources]
+
+        return self._pandas_func(*results)
 
     def __and__(self, other):
         return And(self, other)
@@ -187,107 +308,6 @@ class ArithmeticOperand(object):
     def __comparison(self, other, how_class):
         # TODO: move the _make call into Criterion.__init__
         return how_class(self, _make_projection_or_constant(other))
-
-
-def require_result(func):
-    '''Decorator for functions that require results to be ready'''
-
-    def result_ensured(self, *args, **kwargs):
-        self.compute()
-        return func(self, *args, **kwargs)
-
-    return result_ensured
-
-
-class BaseFrame(BaseThunk):
-    def __init__(self, name=None, sources=None):
-        super().__init__(name=name)
-        # TODO: deduplicate sources
-        self.sources = sources or []
-        self.dependents = []
-        self._cached_result = None
-        self.update = None
-        self.columns = pd.Index([])
-        self._sql_query = None
-
-        # For each source, add this as a dependent
-        for source in self.sources:
-            source.dependents.append(self)
-
-    @property
-    def result(self):
-        if self._cached_result is None:
-            return None
-        elif hasattr(self, 'post_process_result'):
-            return self.post_process_result(self._cached_result)
-        else:
-            return self._cached_result
-
-    def compute(self):
-
-        if self._cached_result is None:
-            if should_offload_computation(self):
-                self._compute_sqlite()
-            else:
-                self._compute_pandas()
-
-        return self.result
-
-    def _compute_pandas(self):
-        raise NotImplementedError("To be implemented by subclasses")
-
-    def _compute_sqlite(self):
-        # Compute result and store in SQLite table
-        query = self.sql(dependencies=True)
-        compute_query = 'CREATE TABLE {} AS {}'.format(self.name, query)
-        SQL_CON.execute(compute_query)
-
-        # Read table as Pandas DataFrame
-        read_query = 'SELECT * FROM {}'.format(self.name)
-        self._cached_result = pd.read_sql_query(read_query, con=SQL_CON)
-        self.columns = self._cached_result.columns
-
-    def sql(self, dependencies=True):
-        query = []
-
-        if dependencies:
-            common_table_expr = _define_dependencies(self)
-            if common_table_expr is not None:
-                query.append(common_table_expr)
-
-        if self.update is None:
-            query.append(self._sql_query)
-        else:
-            query.append(self.update._sql_query)
-
-        return ' '.join(query)
-
-    def sum(self):
-        return Aggregator('SUM', self)
-
-    def mean(self):
-        return Aggregator('AVG', self)
-
-    def count(self):
-        return Aggregator('COUNT', self)
-
-    def min(self):
-        return Aggregator('MIN', self)
-
-    def max(self):
-        return Aggregator('MAX', self)
-
-    def prod(self):
-        return Aggregator('PROD', self)
-
-    def any(self):
-        return Aggregator('AGG_ANY', self)
-
-    def all(self):
-        return Aggregator('AGG_ALL', self)
-
-    def __hash__(self):
-        return super().__hash__()
 
 
 class DataFrame(BaseFrame):
@@ -474,6 +494,9 @@ class Projection(DataFrame, ArithmeticOperand):
         self._sql_query = 'SELECT {} FROM {}'.format(', '.join(self.columns),
                                                      self.sources[0].name)
 
+    def _pandas(self):
+        return self.sources[0].result[self.columns]
+
     def __hash__(self):
         return super().__hash__()
 
@@ -486,6 +509,11 @@ class Selection(DataFrame):
 
         self._sql_query = 'SELECT * FROM {} WHERE {}'.format(
             self.sources[0].name, self.criterion)
+
+    def _pandas(self):
+        # self.criterion might not already be computed since it is not
+        # technically a "source" (dependency). So, explicitly compute it.
+        return self.sources[0].result[self.criterion.compute()]
 
 
 class OrderBy(DataFrame):
@@ -710,47 +738,56 @@ def concat(objs: List[DataFrame]):
 
 class Equal(Criterion):
     def __init__(self, source_1, source_2, name=None):
-        super().__init__('=', source_1, source_2, name=name)
+        super().__init__('=', lambda x, y: x == y,
+                         source_1, source_2, name=name)
 
 
 class NotEqual(Criterion):
     def __init__(self, source_1, source_2, name=None):
-        super().__init__('<>', source_1, source_2, name=name)
+        super().__init__('<>', lambda x, y: x != y,
+                         source_1, source_2, name=name)
 
 
 class LessThan(Criterion):
     def __init__(self, source_1, source_2, name=None):
-        super().__init__('<', source_1, source_2, name=name)
+        super().__init__('<', lambda x, y: x < y,
+                         source_1, source_2, name=name)
 
 
 class LessThanOrEqual(Criterion):
     def __init__(self, source_1, source_2, name=None):
-        super().__init__('<=', source_1, source_2, name=name)
+        super().__init__('<=', lambda x, y: x <= y,
+                         source_1, source_2, name=name)
 
 
 class GreaterThan(Criterion):
     def __init__(self, source_1, source_2, name=None):
-        super().__init__('>', source_1, source_2, name=name)
+        super().__init__('>', lambda x, y: x > y,
+                         source_1, source_2, name=name)
 
 
 class GreaterThanOrEqual(Criterion):
     def __init__(self, source_1, source_2, name=None):
-        super().__init__('>=', source_1, source_2, name=name)
+        super().__init__('>=', lambda x, y: x >= y,
+                         source_1, source_2, name=name)
 
 
 class And(Criterion):
     def __init__(self, source_1, source_2, name=None):
-        super().__init__('AND', source_1, source_2, name=name, simple=False)
+        super().__init__('AND', lambda x, y: x & y,
+                         source_1, source_2, name=name, simple=False)
 
 
 class Or(Criterion):
     def __init__(self, source_1, source_2, name=None):
-        super().__init__('OR', source_1, source_2, name=name, simple=False)
+        super().__init__('OR', lambda x, y: x | y,
+                         source_1, source_2, name=name, simple=False)
 
 
 class Not(Criterion):
     def __init__(self, source, name=None):
-        super().__init__('NOT', source, name=name, simple=False)
+        super().__init__('NOT', lambda x: ~x,
+                         source, name=name, simple=False)
 
     def __str__(self):
         return 'NOT ({})'.format(self.sources[0])
@@ -812,6 +849,9 @@ class Arithmetic(DataFrame, ArithmeticOperand):
                 return source._operation_as_str()
         else:
             raise TypeError("Unexpected source type {}".format(type(source)))
+
+    def _pandas(self):
+        raise NotImplementedError
 
 
 class Add(Arithmetic):
@@ -888,7 +928,8 @@ def offloading_strategy(name=None):
         global OFFLOADING_STRATEGY
         OFFLOADING_STRATEGY = name
 
-    return OFFLOADING_STRATEGY
+    else:
+        return OFFLOADING_STRATEGY
 
 
 def should_offload_computation(df: BaseFrame):
