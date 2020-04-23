@@ -171,7 +171,59 @@ class TestPandasExecution(unittest.TestCase):
         assertDataFrameEqualsPandas(res, base_res)
 
     def test_write_column(self):
-        return NotImplemented
+        base_df = pd.DataFrame([{'n': i, 'a': str(i*2)} for i in range(10)])
+        df = ps.DataFrame(base_df)
+
+        # Duplicate a column
+        df['b'] = df['n']
+        base_df['b'] = base_df['n']
+        df['c'] = df['b'] * 2
+        base_df['c'] = base_df['b'] * 2
+
+        pd.testing.assert_index_equal(df.columns, base_df.columns)
+        assertDataFrameEqualsPandas(df, base_df)
+
+        # Write a constant column
+        df['d'] = 10
+        df['e'] = 'dummy'
+        base_df['d'] = 10
+        base_df['e'] = 'dummy'
+
+        pd.testing.assert_index_equal(df.columns, base_df.columns)
+        assertDataFrameEqualsPandas(df, base_df)
+
+    def test_write_on_downstream_dataframe(self):
+        base_df = pd.DataFrame([{'n': i, 'a': str(i*2)} for i in range(10)])
+        df = ps.DataFrame(base_df)
+
+        # New columns
+        selection = df[df['a'] != '4']
+        selection['b'] = 10
+
+        # Make new copy to avoid Pandas warning about writing to a slice
+        expected = pd.DataFrame(base_df[base_df['a'] != '4'])
+        expected['b'] = 10
+
+        pd.testing.assert_index_equal(selection.columns, expected.columns)
+        assertDataFrameEqualsPandas(selection, expected)
+
+    def test_old_dependents_after_write(self):
+        base_df = pd.DataFrame([{'n': i, 'a': str(i*2)} for i in range(10)])
+        df = ps.DataFrame(base_df, deep_copy=True)
+
+        old_proj = df['a']
+        expected_old_proj = base_df[['a']]
+
+        # Change values in column
+        df['a'] = df['n']
+        base_df['a'] = base_df['n']
+
+        # df should have the updated column
+        pd.testing.assert_index_equal(df.columns, base_df.columns)
+        assertDataFrameEqualsPandas(df, base_df)
+
+        # But old_proj should have old values of column
+        assertDataFrameEqualsPandas(old_proj, expected_old_proj)
 
     def test_complex_read_query(self):
         return NotImplemented

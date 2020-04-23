@@ -47,6 +47,8 @@ class BaseFrame(object):
             return self._cached_result
 
     def compute(self):
+        # TODO: explore if there are situations when some part of the
+        # computation should be offloaded, whereas others should not.
 
         if self._cached_result is None:
             if should_offload_computation(self):
@@ -63,15 +65,23 @@ class BaseFrame(object):
             ordered_deps = _topological_sort(graph)
 
             # Compute all dependencies in order (via Pandas)
-            # TODO: should GroupByDataFrame be excluded here too?
             for t in ordered_deps:
                 if t is not self and t.result is None \
                         and isinstance(t, BaseFrame):
-                    t._compute_pandas()
+                    t.compute()
 
             # Finally, compute this object's result
+            if self.update is None:
+                result = self._pandas()
+            else:   # Trigger the lazy write that is pending for this object
+                result = self.update.source.result.copy(deep=True)
+
+                # The value to be written may not have been computed because
+                # it is not technically a "source". So, compute it explicitly.
+                result[self.update.col] = self.update.value.compute()
+
             # TODO(important): when should this result be offloaded to SQLite?
-            self._cached_result = self._pandas()
+            self._cached_result = result
 
         return self.result
 
@@ -313,7 +323,7 @@ class ArithmeticOperand(object):
 
 
 class DataFrame(BaseFrame):
-    def __init__(self, data=None, name=None, sources=None):
+    def __init__(self, data=None, name=None, sources=None, deep_copy=False):
         super().__init__(name=name, sources=sources)
         df = None
 
@@ -323,10 +333,10 @@ class DataFrame(BaseFrame):
             self._cached_result = df
         elif isinstance(data, pd.DataFrame):
             df = data
-            self._cached_result = df
+            self._cached_result = df.copy(deep=deep_copy)
         elif isinstance(data, DataFrame):
             df = data.compute()
-            self._cached_result = df
+            self._cached_result = df.copy(deep=deep_copy)
         elif data is None:
             pass
         else:
@@ -357,6 +367,9 @@ class DataFrame(BaseFrame):
         # which already depend on self
         old = DataFrame()
         old.__dict__.update(self.__dict__)
+
+        # Make a copy of the _pandas method so old._pandas() works correctly
+        old._pandas = lambda: self.__class__._pandas(old)
 
         # For all dependents, replace self as a source, and add old instead
         for dependent in old.dependents:
