@@ -107,7 +107,17 @@ class TestPandasExecution(unittest.TestCase):
         assertDataFrameEqualsPandas(merged_b, expected)
 
     def test_arithmetic(self):
-        return NotImplemented
+        base_df = pd.DataFrame([{'n': i, 'm': 10-i} for i in range(10)])
+        df = ps.DataFrame(base_df)
+
+        assertDataFrameEqualsPandas(df['n'] + 2 * df['m'],
+                                    base_df['n'] + 2 * base_df['m'])
+        assertDataFrameEqualsPandas((df['n'] - 1) // (2 ** (df['m'] % 3)),
+                                    (base_df['n'] - 1) // (2 ** (base_df['m'] % 3)))  # noqa
+        assertDataFrameEqualsPandas(abs(df['n']) // 5 & df['m'],
+                                    abs(base_df['n']) // 5 & base_df['m'])
+        assertDataFrameEqualsPandas(df['n'] | 0 ^ ~df['m'],
+                                    base_df['n'] | 0 ^ ~base_df['m'])
 
     def test_aggregators(self):
         return NotImplemented

@@ -185,7 +185,8 @@ class Criterion(BaseFrame):
                                  self._source_to_str(self.sources[1]))
 
     def _pandas(self):
-        results = [s.result[s.columns[0]] if isinstance(s, Projection)
+        results = [s.result[s.columns[0]]
+                   if isinstance(s, Projection) and len(s.columns) == 1
                    else s.result for s in self.sources]
 
         return self._pandas_func(*results)
@@ -816,17 +817,15 @@ class Arithmetic(DataFrame, ArithmeticOperand):
 
         sources = []
 
-        self.operand_1 = _make_projection_or_constant(operand_1, simple=True)
-        if isinstance(self.operand_1, DataFrame):
-            sources += self.operand_1.sources
+        self.operands = [_make_projection_or_constant(operand_1, simple=True)]
+        if isinstance(self.operands[0], DataFrame):
+            sources += self.operands[0].sources
 
         if operand_2 is not None:
-            self.operand_2 = _make_projection_or_constant(operand_2,
-                                                          simple=True)
-            if isinstance(self.operand_2, DataFrame):
-                sources += self.operand_2.sources
-
-        self.unary = operand_2 is None
+            self.operands.append(_make_projection_or_constant(operand_2,
+                                                              simple=True))
+            if isinstance(self.operands[1], DataFrame):
+                sources += self.operands[1].sources
 
         super().__init__(name=name, sources=sources)
 
@@ -840,19 +839,28 @@ class Arithmetic(DataFrame, ArithmeticOperand):
             self._operation_as_str(), self.sources[0].name)
 
     def _pandas(self):
-        return NotImplemented
+        # Operands might not be already computed since they are not technically
+        # "sources" (dependencies). So, explicitly compute them.
+        for operand in self.operands:
+            operand.compute()
+
+        results = [op.result[op.columns[0]]
+                   if isinstance(op, Projection) and len(op.columns) == 1
+                   else op.result for op in self.operands]
+
+        return self._pandas_func(*results)
 
     def _operation_as_str(self):
-        if self.unary:
+        if len(self.operands) == 1:
             fmt = '{op}{x}' if self.inline else'{op}({x})'
 
-            return fmt.format(x=self._operand_to_str(self.operand_1),
+            return fmt.format(x=self._operand_to_str(self.operands[0]),
                               op=self.operation)
         else:
             fmt = '{x} {op} {y}' if self.inline else'{op}({x}, {y})'
 
-            return fmt.format(x=self._operand_to_str(self.operand_1),
-                              y=self._operand_to_str(self.operand_2),
+            return fmt.format(x=self._operand_to_str(self.operands[0]),
+                              y=self._operand_to_str(self.operands[1]),
                               op=self.operation)
 
     @staticmethod
@@ -872,7 +880,7 @@ class Arithmetic(DataFrame, ArithmeticOperand):
 
 class Add(Arithmetic):
     def __init__(self, source_1, source_2, name=None):
-        super().__init__('+', lambda x, y: x+y, source_1, source_2,
+        super().__init__('+', lambda x, y: x + y, source_1, source_2,
                          name=name, inline=True)
 
 
