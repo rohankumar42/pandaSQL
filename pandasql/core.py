@@ -178,8 +178,6 @@ class Criterion(BaseFrame):
 
         super().__init__(name=name, sources=sources)
 
-    # TODO: put this in self.as_sql_criterion() and make __str__()
-    # actually compute like other BaseFrames
     def __str__(self):
         '''Default for binary Criterion objects'''
         return '{} {} {}'.format(self._source_to_str(self.sources[0]),
@@ -542,6 +540,10 @@ class OrderBy(DataFrame):
         self._sql_query = 'SELECT * FROM {} ORDER BY {}' \
             .format(self.sources[0].name, ', '.join(order_by))
 
+    def _pandas(self):
+        return self.sources[0].result.sort_values(self.order_cols,
+                                                  ascending=self.ascending)
+
 
 class Join(DataFrame):
     def __init__(self, source_1: DataFrame, source_2: DataFrame,
@@ -564,6 +566,10 @@ class Join(DataFrame):
             .format(self.sources[0].name, self.sources[1].name,
                     ','.join(self.join_keys))
 
+    def _pandas(self):
+        return pd.merge(self.sources[0].result, self.sources[1].result,
+                        on=self.join_keys)
+
 
 class Union(DataFrame):
     def __init__(self, sources: List[DataFrame], name=None):
@@ -580,6 +586,9 @@ class Union(DataFrame):
                                              .format(source.name)
                                              for source in self.sources)
 
+    def _pandas(self):
+        return pd.concat([s.result for s in self.sources])
+
 
 class Limit(DataFrame):
     def __init__(self, source: DataFrame, n: int, name=None):
@@ -590,6 +599,9 @@ class Limit(DataFrame):
 
         self._sql_query = 'SELECT * FROM {} LIMIT {}'.format(
             self.sources[0].name, self.n)
+
+    def _pandas(self):
+        return self.sources[0].result[:self.n]
 
 
 ##############################################################################
@@ -792,14 +804,15 @@ class Not(Criterion):
     def __str__(self):
         return 'NOT ({})'.format(self.sources[0])
 
+
 ##############################################################################
 #                           Arithmetic Classes
 ##############################################################################
 
 
 class Arithmetic(DataFrame, ArithmeticOperand):
-    def __init__(self, operation, operand_1, operand_2=None, inline=False,
-                 name=None):
+    def __init__(self, operation, pandas_func, operand_1, operand_2=None,
+                 inline=False, name=None):
 
         sources = []
 
@@ -817,11 +830,17 @@ class Arithmetic(DataFrame, ArithmeticOperand):
 
         super().__init__(name=name, sources=sources)
 
+        assert(callable(pandas_func))
+        self._pandas_func = pandas_func
+
         self.operation = operation
         self.inline = inline
 
         self._sql_query = 'SELECT {} AS res FROM {}'.format(
             self._operation_as_str(), self.sources[0].name)
+
+    def _pandas(self):
+        return NotImplemented
 
     def _operation_as_str(self):
         if self.unary:
@@ -850,68 +869,75 @@ class Arithmetic(DataFrame, ArithmeticOperand):
         else:
             raise TypeError("Unexpected source type {}".format(type(source)))
 
-    def _pandas(self):
-        raise NotImplementedError
-
 
 class Add(Arithmetic):
     def __init__(self, source_1, source_2, name=None):
-        super().__init__('+', source_1, source_2, name=name, inline=True)
+        super().__init__('+', lambda x, y: x+y, source_1, source_2,
+                         name=name, inline=True)
 
 
 class Subtract(Arithmetic):
     def __init__(self, source_1, source_2, name=None):
-        super().__init__('-', source_1, source_2, name=name, inline=True)
+        super().__init__('-', lambda x, y: x - y, source_1, source_2,
+                         name=name, inline=True)
 
 
 class Multiply(Arithmetic):
     def __init__(self, source_1, source_2, name=None):
-        super().__init__('*', source_1, source_2, name=name, inline=True)
+        super().__init__('*', lambda x, y: x * y, source_1, source_2,
+                         name=name, inline=True)
 
 
 class Divide(Arithmetic):
     def __init__(self, source_1, source_2, name=None):
-        super().__init__('DIV', source_1, source_2, name=name)
+        super().__init__('DIV', lambda x, y: x / y, source_1, source_2,
+                         name=name)
 
 
 class FloorDivide(Arithmetic):
     def __init__(self, source_1, source_2, name=None):
-        super().__init__('FLOORDIV', source_1, source_2, name=name)
+        super().__init__('FLOORDIV', lambda x, y: x // y, source_1, source_2,
+                         name=name)
 
 
 class Modulo(Arithmetic):
     def __init__(self, source_1, source_2, name=None):
-        super().__init__('MOD', source_1, source_2, name=name)
+        super().__init__('MOD', lambda x, y: x % y, source_1, source_2,
+                         name=name)
 
 
 class Power(Arithmetic):
     def __init__(self, source_1, source_2, name=None):
-        super().__init__('POW', source_1, source_2, name=name)
+        super().__init__('POW', lambda x, y: x ** y, source_1, source_2,
+                         name=name)
 
 
 class BitAnd(Arithmetic):
     def __init__(self, source_1, source_2, name=None):
-        super().__init__('BITAND', source_1, source_2, name=name)
+        super().__init__('BITAND', lambda x, y: x & y, source_1, source_2,
+                         name=name)
 
 
 class BitOr(Arithmetic):
     def __init__(self, source_1, source_2, name=None):
-        super().__init__('BITOR', source_1, source_2, name=name)
+        super().__init__('BITOR', lambda x, y: x | y, source_1, source_2,
+                         name=name)
 
 
 class BitXor(Arithmetic):
     def __init__(self, source_1, source_2, name=None):
-        super().__init__('BITXOR', source_1, source_2, name=name)
+        super().__init__('BITXOR', lambda x, y: x ^ y, source_1, source_2,
+                         name=name)
 
 
 class Invert(Arithmetic):
     def __init__(self, source, name=None):
-        super().__init__('INV', source, name=name)
+        super().__init__('INV', lambda x: ~x, source, name=name)
 
 
 class Abs(Arithmetic):
     def __init__(self, source, name=None):
-        super().__init__('abs', source, name=name)
+        super().__init__('abs', abs, source, name=name)
 
 
 ##############################################################################
