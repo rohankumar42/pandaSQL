@@ -27,6 +27,7 @@ class BaseFrame(object):
         self.sources = sources or []
         self.dependents = []
         self._cached_result = None
+        self._computed_on_pandas = False
         self.update = None
         self.columns = pd.Index([])
         self._sql_query = None
@@ -39,8 +40,9 @@ class BaseFrame(object):
     def result(self):
         if self._cached_result is None:
             return None
-        elif hasattr(self, 'post_process_result'):
-            return self.post_process_result(self._cached_result)
+        elif hasattr(self, 'process_result') and not self._computed_on_pandas:
+            # If result was not computed on Pandas, post-process result
+            return self.process_result(self._cached_result)
         else:
             return self._cached_result
 
@@ -50,6 +52,7 @@ class BaseFrame(object):
             if should_offload_computation(self):
                 self._compute_sqlite()
             else:
+                self._computed_on_pandas = True
                 self._compute_pandas()
 
         return self.result
@@ -105,28 +108,28 @@ class BaseFrame(object):
         return ' '.join(query)
 
     def sum(self):
-        return Aggregator('SUM', self)
+        return Aggregator('sum', self)
 
     def mean(self):
-        return Aggregator('AVG', self)
+        return Aggregator('mean', self)
 
     def count(self):
-        return Aggregator('COUNT', self)
+        return Aggregator('count', self)
 
     def min(self):
-        return Aggregator('MIN', self)
+        return Aggregator('min', self)
 
     def max(self):
-        return Aggregator('MAX', self)
+        return Aggregator('max', self)
 
     def prod(self):
-        return Aggregator('PROD', self)
+        return Aggregator('prod', self)
 
     def any(self):
-        return Aggregator('AGG_ANY', self)
+        return Aggregator('any', self)
 
     def all(self):
-        return Aggregator('AGG_ALL', self)
+        return Aggregator('all', self)
 
     def __str__(self):
         return self.name
@@ -637,6 +640,11 @@ class GroupByDataFrame(BaseFrame):
         return 'GroupBy({}, by={})'.format(self.sources[0].name,
                                            self.groupby_cols)
 
+    def _pandas(self):
+        grouped = self.sources[0].result.groupby(self.groupby_cols,
+                                                 as_index=self.as_index)
+        return grouped[self.columns]
+
 
 class GroupByProjection(GroupByDataFrame):
     def __init__(self, source: GroupByDataFrame, col, name=None):
@@ -669,18 +677,26 @@ class GroupByProjection(GroupByDataFrame):
 
 
 class Aggregator(DataFrame):
-    VALID_AGGREGATORS = ['SUM', 'COUNT', 'AVG', 'MIN', 'MAX',
-                         'PROD', 'AGG_ANY', 'AGG_ALL']
+    AGGREGATORS = {
+        'sum': 'SUM',
+        'count': 'COUNT',
+        'mean': 'AVG',
+        'min': 'MIN',
+        'max': 'MAX',
+        'prod': 'PROD',
+        'any': 'AGG_ANY',
+        'all': 'AGG_ALL'
+    }
 
     def __init__(self, agg, source: BaseFrame, name=None):
         super().__init__(sources=[source], name=name)
 
-        assert(agg in self.VALID_AGGREGATORS)
         self.agg = agg
+        self.agg_sql = self.AGGREGATORS[agg]
         self.grouped = isinstance(source, GroupByDataFrame)
 
         # TODO: only use valid columns for aggregation operation
-        cols = ['{}({}) AS {}'.format(agg, c, c)
+        cols = ['{}({}) AS {}'.format(self.agg_sql, c, c)
                 for c in source.columns]
 
         if not self.grouped:
@@ -688,7 +704,7 @@ class Aggregator(DataFrame):
                                                          source.name)
         else:
             cols = list(source.groupby_cols)
-            cols += ['{}({}) AS {}'.format(agg, c, c)
+            cols += ['{}({}) AS {}'.format(self.agg_sql, c, c)
                      for c in source.columns
                      if c not in source.groupby_cols]
 
@@ -700,12 +716,26 @@ class Aggregator(DataFrame):
 
         # Set return types in cases where explicit conversion is needed,
         # e.g., bool because SQLite doesn't have bools
-        if agg in ['AGG_ANY', 'AGG_ALL']:
+        if self.agg_sql in ['AGG_ANY', 'AGG_ALL']:
             self.final_type = bool
         else:
             self.final_type = None
 
-    def post_process_result(self, result):
+    def _pandas(self):
+        if self.grouped:
+            result = getattr(self.sources[0].result, self.agg)()
+            if len(result.columns) == 1:
+                result = result[result.columns[0]]
+
+        else:
+            source = self.sources[0].result
+            if len(self.columns) == 1:
+                source = source[source.columns[0]]
+            result = getattr(source, self.agg)()
+
+        return result
+
+    def process_result(self, result):
         '''This function will be called by BaseFrame.compute'''
         if self.grouped and self.sources[0].as_index:
             # Add index to the computed Pandas DataFrame, like Pandas would

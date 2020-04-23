@@ -120,10 +120,55 @@ class TestPandasExecution(unittest.TestCase):
                                     base_df['n'] | 0 ^ ~base_df['m'])
 
     def test_aggregators(self):
-        return NotImplemented
+        base_df = pd.DataFrame([{'m': i, 'n': 10-i} for i in range(0, 10)])
+        df = ps.DataFrame(base_df)
+
+        # Single-column aggregation
+        self.assertEqual(df['n'].sum().compute(), base_df['n'].sum())
+        self.assertEqual(df['n'].mean().compute(), base_df['n'].mean())
+        self.assertEqual(df['n'].count().compute(), base_df['n'].count())
+        self.assertEqual(df['n'].min().compute(), base_df['n'].min())
+        self.assertEqual(df['n'].max().compute(), base_df['n'].max())
+        self.assertEqual(df['n'].prod().compute(), base_df['n'].prod())
+        self.assertEqual(df['n'].any().compute(), base_df['n'].any())
+        self.assertEqual(df['n'].all().compute(), base_df['n'].all())
+
+        # Multi-column aggregation
+        assertDataFrameEqualsPandas(df.sum(), base_df.sum())
+        assertDataFrameEqualsPandas(df.mean(), base_df.mean())
+        assertDataFrameEqualsPandas(df.count(), base_df.count())
+        assertDataFrameEqualsPandas(df.min(), base_df.min())
+        assertDataFrameEqualsPandas(df.max(), base_df.max())
+        assertDataFrameEqualsPandas(df.prod(), base_df.prod())
+        assertDataFrameEqualsPandas(df.any(), base_df.any())
+        assertDataFrameEqualsPandas(df.all(), base_df.all())
 
     def test_groupby(self):
-        return NotImplemented
+        base_df = pd.DataFrame([
+            {'a': str(i), 'b': str(j), 'c': 100*i, 'd': -j}
+            for i in range(3) for j in range(3)
+        ])
+        df = ps.DataFrame(base_df)
+
+        # Regular groupby
+        res = df.groupby(['a', 'b'], as_index=False).sum()
+        base_res = base_df.groupby(['a', 'b'], as_index=False).sum()
+        assertDataFrameEqualsPandas(res, base_res)
+
+        # groupby with group names in index
+        res = df.groupby('a', as_index=True).prod()
+        base_res = base_df.groupby('a', as_index=True).prod()
+        assertDataFrameEqualsPandas(res, base_res)
+
+        # Projection before aggregation
+        res = df.groupby(['a', 'b'], as_index=False)['c'].count()
+        base_res = base_df.groupby(['a', 'b'], as_index=False)['c'].count()
+        assertDataFrameEqualsPandas(res, base_res)
+
+        # Projection before aggregation with group names in index
+        res = df.groupby(['a', 'b'], as_index=True)['c'].all()
+        base_res = base_df.groupby(['a', 'b'], as_index=True)['c'].all()
+        assertDataFrameEqualsPandas(res, base_res)
 
     def test_write_column(self):
         return NotImplemented
