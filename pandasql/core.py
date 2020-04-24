@@ -638,7 +638,7 @@ class GroupByDataFrame(BaseFrame):
 
         super().__init__(name=name, sources=[source])
         self.base_name = source.name
-        self.columns = source.columns
+        self.columns = source.columns.union(pd.Index(self.groupby_cols))
         self.as_index = as_index
 
     def __getitem__(self, x):
@@ -656,7 +656,9 @@ class GroupByDataFrame(BaseFrame):
     def _pandas(self):
         grouped = self.sources[0].result.groupby(self.groupby_cols,
                                                  as_index=self.as_index)
-        return grouped[self.columns]
+        # When as_index=False, Pandas does not like it if you select a
+        # column that is being grouped by
+        return grouped[self.columns[~self.columns.isin(self.groupby_cols)]]
 
 
 class GroupByProjection(GroupByDataFrame):
@@ -676,7 +678,8 @@ class GroupByProjection(GroupByDataFrame):
         if len(pd.Index(cols).difference(source.columns)) > 0:
             raise ValueError("Projection columns {} are not a subset of {}"
                              .format(cols, source.columns))
-        self.columns = source.columns[source.columns.isin(cols)]
+        self.columns = self.columns[self.columns.isin(cols)
+                                    | self.columns.isin(self.groupby_cols)]
 
     def __str__(self):
         return 'GroupByProjection({}, by={}, cols={})' \
