@@ -467,10 +467,7 @@ class TestDataFrame(unittest.TestCase):
         ordered = agg.sort_values(by=key, ascending=False)
         limit = ordered.head(3)
 
-        # This should trigger computation
-        str(limit)
-
-        # All dependencies should also have cached results
+        # All dependencies should have correct results
         assertDataFrameEqualsPandas(merged, base_merged)
         assertDataFrameEqualsPandas(agg, base_agg)
         assertDataFrameEqualsPandas(ordered, base_ordered)
@@ -504,10 +501,7 @@ class TestDataFrame(unittest.TestCase):
         agg['sum'] = agg['a'] + agg['b']
         ordered = agg.sort_values(by='sum')
 
-        # This should trigger computation
-        str(ordered)
-
-        # All dependencies should also have cached results
+        # All dependencies should have correct results
         assertDataFrameEqualsPandas(merged, base_merged)
         assertDataFrameEqualsPandas(agg, base_agg)
         assertDataFrameEqualsPandas(ordered, base_ordered)
