@@ -538,7 +538,7 @@ class OrderBy(DataFrame):
         if isinstance(cols, str):
             cols = [cols]
         if isinstance(ascending, bool):
-            ascending = [ascending]
+            ascending = [ascending] * len(cols)
         if len(cols) != len(ascending):
             raise ValueError("cols and ascending must be equal lengths, "
                              "but found len(cols)={} and len(ascending)={}"
@@ -750,10 +750,7 @@ class Aggregator(DataFrame):
 
     def process_result(self, result):
         '''This function will be called by BaseFrame.compute'''
-        if self.grouped and self.sources[0].as_index:
-            # Add index to the computed Pandas DataFrame, like Pandas would
-            ret = result.set_index(self.sources[0].groupby_cols)
-        elif len(result) == 1:
+        if len(result) == 1:
             series = result.iloc[0]
             if len(series) == 1:    # Single numerical value
                 ret = series[0]
