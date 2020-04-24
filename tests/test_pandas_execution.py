@@ -226,7 +226,69 @@ class TestPandasExecution(unittest.TestCase):
         assertDataFrameEqualsPandas(old_proj, expected_old_proj)
 
     def test_complex_read_query(self):
-        return NotImplemented
+        base_df_1 = pd.DataFrame([
+            {'a': str(i), 'b': str(j), 'c': 100*i, 'd': -j}
+            for i in range(3) for j in range(3)
+        ])
+        base_df_2 = pd.DataFrame([
+            {'a': str(i), 'b': str(j), 'e': 50*i, 'f': j}
+            for i in range(3) for j in range(3)
+        ])
+        df_1 = ps.DataFrame(base_df_1)
+        df_2 = ps.DataFrame(base_df_2)
+
+        key = ['a', 'b']
+        base_merged = base_df_1.merge(base_df_2, on=key)
+        base_agg = base_merged.groupby(key, as_index=False)[['c', 'f']].sum()
+        base_ordered = base_agg.sort_values(by=key, ascending=False)
+        base_limit = base_ordered.head(3)
+
+        merged = df_1.merge(df_2, on=key)
+        agg = merged.groupby(key)[['c', 'f']].sum()
+        ordered = agg.sort_values(by=key, ascending=False)
+        limit = ordered.head(3)
+
+        # This should trigger computation
+        self.assertEqual(str(limit), str(base_limit))
+
+        # All dependencies should also have cached results
+        pd.testing.assert_frame_equal(merged.result, base_merged)
+        pd.testing.assert_frame_equal(agg.result, base_agg)
+        pd.testing.assert_frame_equal(ordered.result, base_ordered)
+        pd.testing.assert_frame_equal(limit.result, base_limit)
 
     def test_complex_write_query(self):
-        return NotImplemented
+        base_df_1 = pd.DataFrame([
+            {'a': i, 'b': j, 'c': 100*i, 'd': -j}
+            for i in range(3) for j in range(3)
+        ])
+        base_df_2 = pd.DataFrame([
+            {'a': i, 'b': j, 'e': 50*i, 'f': j}
+            for i in range(3) for j in range(3)
+        ])
+        df_1 = ps.DataFrame(base_df_1)
+        df_2 = ps.DataFrame(base_df_2)
+
+        base_merged = base_df_1.merge(base_df_2, on=['a', 'b'])
+        base_merged['diff'] = base_merged['c'] - base_merged['e']
+        base_merged['key'] = base_merged['diff'] * \
+            (base_merged['d'] - base_merged['f'])
+        base_agg = base_merged.groupby('key', as_index=False)[['a', 'b']].sum()
+        base_agg['sum'] = base_agg['a'] + base_agg['b']
+        base_ordered = base_agg.sort_values(by='sum')
+
+        merged = df_1.merge(df_2, on=['a', 'b'])
+        merged['diff'] = merged['c'] - merged['e']
+        merged['key'] = merged['diff'] * \
+            (merged['d'] - merged['f'])
+        agg = merged.groupby('key')[['a', 'b']].sum()
+        agg['sum'] = agg['a'] + agg['b']
+        ordered = agg.sort_values(by='sum')
+
+        # This should trigger computation
+        self.assertEqual(str(ordered), str(base_ordered))
+
+        # All dependencies should also have cached results
+        pd.testing.assert_frame_equal(merged.result, base_merged)
+        pd.testing.assert_frame_equal(agg.result, base_agg)
+        pd.testing.assert_frame_equal(ordered.result, base_ordered)
