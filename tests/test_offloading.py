@@ -2,7 +2,7 @@ import unittest
 
 import pandas as pd
 import pandasql as ps
-from utils import assertDataFrameEqualsPandas
+from .utils import assertDataFrameEqualsPandas
 
 
 class TestPandasExecution(unittest.TestCase):

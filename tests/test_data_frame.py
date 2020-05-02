@@ -4,7 +4,7 @@ import pandas as pd
 import pandasql as ps
 from pandasql.core import Selection, Projection, Union, Join, Limit, OrderBy, \
     Aggregator, GroupByDataFrame, GroupByProjection
-from utils import assertDataFrameEqualsPandas
+from .utils import assertDataFrameEqualsPandas
 
 
 class TestDataFrame(unittest.TestCase):
