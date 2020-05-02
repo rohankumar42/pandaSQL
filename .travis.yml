@@ -4,8 +4,8 @@ python:
   - "3.7"
 install:
   - pip install .
-  - pip install pytest-cov python-coveralls  # For tests and coverage
+  - pip install pytest pytest-cov python-coveralls  # For tests and coverage
 script:
-  - python -m py.test --cov=./
+  - py.test --cov=./
 after_success:
   - coveralls
