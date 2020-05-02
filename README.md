@@ -1,7 +1,11 @@
 # pandaSQL
 
-pandaSQL is a data-analysis library inspired by [pandas](https://github.com/pandas-dev/pandas), but designed to use existing database optimization techniques. While pandaSQL provides the familiar pandas-like API, internally, it uses SQLite to get  you results faster.
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://github.com/rohankumar42/pandaSQL/blob/master/LICENSE)
+[![Build Status](https://travis-ci.com/rohankumar42/pandaSQL.svg?branch=master)](https://travis-ci.com/rohankumar42/pandaSQL)
+[![Coverage Status](https://coveralls.io/repos/github/rohankumar42/pandaSQL/badge.svg?branch=master)](https://coveralls.io/github/rohankumar42/pandaSQL?branch=master)
 
+
+pandaSQL is a data-analysis library inspired by [pandas](https://github.com/pandas-dev/pandas), but designed to use existing database optimization techniques. While pandaSQL provides the familiar pandas-like API, internally, it uses SQLite to get  you results faster.
 
 ## Install
 
