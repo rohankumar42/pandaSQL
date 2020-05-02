@@ -27,6 +27,7 @@ class BaseFrame(object):
         self.sources = sources or []
         self.dependents = []
         self._cached_result = None
+        self._cached_on_sqlite = False
         self._computed_on_pandas = False
         self.update = None
         self.columns = pd.Index([])
@@ -51,10 +52,15 @@ class BaseFrame(object):
         # computation should be offloaded, whereas others should not.
 
         if self._cached_result is None:
+            # TODO: If A is computed on Pandas, and B depends on A and
+            # is about to be computed on SQLite, should A be computed as
+            # part of B's SQL query, or should A's result be first transferred
+            # to SQLite? Probably not one-size-fits-all. Currently, the former
+            # occurs every time.
+
             if should_offload_computation(self):
                 self._compute_sqlite()
             else:
-                self._computed_on_pandas = True
                 self._compute_pandas()
 
         return self.result
@@ -82,6 +88,7 @@ class BaseFrame(object):
 
             # TODO(important): when should this result be offloaded to SQLite?
             self._cached_result = result
+            self._computed_on_pandas = True
 
         return self.result
 
@@ -95,6 +102,7 @@ class BaseFrame(object):
             # Read table as Pandas DataFrame
             read_query = 'SELECT * FROM {}'.format(self.name)
             self._cached_result = pd.read_sql_query(read_query, con=SQL_CON)
+            self._cached_on_sqlite = True
             self.columns = self._cached_result.columns
 
         return self.result
@@ -346,6 +354,7 @@ class DataFrame(BaseFrame):
         if df is not None and len(df) > 0:
             # Offload dataframe to SQLite
             df.to_sql(name=self.name, con=SQL_CON, index=False)
+            self._cached_on_sqlite = True
 
             # Store columns
             self.columns = df.columns
@@ -1031,12 +1040,12 @@ def _define_dependencies(df: DataFrame):
 
     # Do NOT define a dependency t if any of the following is true:
     #   (1) t is the current df
-    #   (2) t.result is not None (result cached)
+    #   (2) t is already cached on SQLite
     #   (3) t is a GroupByDataFrame object
     common_table_exprs = [
         '{} AS ({})'.format(t.name, t.sql(dependencies=False))
         for t in ordered_deps
-        if t is not df and t.result is None and isinstance(t, DataFrame)
+        if t is not df and not t._cached_on_sqlite and isinstance(t, DataFrame)
     ]
 
     if len(common_table_exprs) > 0:

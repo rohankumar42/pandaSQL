@@ -292,3 +292,7 @@ class TestPandasExecution(unittest.TestCase):
         pd.testing.assert_frame_equal(merged.result, base_merged)
         pd.testing.assert_frame_equal(agg.result, base_agg)
         pd.testing.assert_frame_equal(ordered.result, base_ordered)
+
+
+if __name__ == "__main__":
+    unittest.main()
