@@ -6,6 +6,7 @@ install:
   - pip install .
   - pip install pytest pytest-cov coveralls  # For tests and coverage
 script:
+  - python -c "import sqlite3; print(sqlite3.sqlite_version)"
   - py.test --cov=./
 after_success:
   - coveralls
