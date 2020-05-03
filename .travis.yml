@@ -4,7 +4,7 @@ python:
   - "3.7"
 before_install:
   - sudo apt-get update 
-  - sudo apt-get install sqlite3 
+  - sudo apt-get install --only-upgrade sqlite3 
 install:
   - pip install .
   - pip install pytest pytest-cov coveralls  # For tests and coverage
