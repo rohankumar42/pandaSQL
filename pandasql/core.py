@@ -597,7 +597,8 @@ class Join(DataFrame):
         left_cols = [f'{source_1.name}.{c}' for c in left_keys]
         right_cols = [f'{source_2.name}.{c}' for c in right_keys]
         output_cols = [f'{source_1.name}.{c}' if c in source_1.columns
-                       else f'{source_2.name}.{c}' for c in self.columns]
+                       else f'{source_2.name}.{c}'
+                       for c in self.columns]
         self._sql_query = 'SELECT {} FROM {} JOIN {} ON ({}) = ({})' \
             .format(', '.join(output_cols), source_1.name, source_2.name,
                     ','.join(left_cols), ','.join(right_cols))

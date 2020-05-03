@@ -267,6 +267,9 @@ class TestDataFrame(unittest.TestCase):
 
         expected = base_df_1[base_df_1['n'] < 8].merge(
             base_df_2[base_df_2['n'] >= 3], on='n')
+        print('\ntest_caching_in_sqlite')
+        print(merged)
+        print(expected)
         assertDataFrameEqualsPandas(merged, expected)
 
     def test_duplicating_column(self):
@@ -494,6 +497,8 @@ class TestDataFrame(unittest.TestCase):
         agg = merged.groupby(key)[['c', 'f']].sum()
         ordered = agg.sort_values(by=key, ascending=False)
         limit = ordered.head(3)
+        print('\ntest_complex_read_query')
+        print(merged.sql())
 
         # All dependencies should have correct results
         assertDataFrameEqualsPandas(merged, base_merged)
