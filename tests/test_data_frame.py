@@ -138,17 +138,41 @@ class TestDataFrame(unittest.TestCase):
         df_1 = ps.DataFrame(base_df_1)
         base_df_2 = pd.DataFrame([{'n': i, 's2': str(i*2)} for i in range(10)])
         df_2 = ps.DataFrame(base_df_2)
+
         merged = df_1.merge(df_2, on='n')
         self.assertIsInstance(merged, Join)
 
         sql = merged.sql()
-        self.assertEqual(sql, 'SELECT * FROM {} JOIN {} USING (n)'
-                         .format(df_1.name, df_2.name))
+        self.assertEqual(sql,
+                         'SELECT {}.n, {}.s1, {}.s2 FROM '
+                         '{} JOIN {} ON ({}.n) = ({}.n)'
+                         .format(df_1.name, df_1.name, df_2.name, df_1.name,
+                                 df_2.name, df_1.name, df_2.name))
 
         expected = base_df_1.merge(base_df_2, on='n')
         assertDataFrameEqualsPandas(merged, expected)
 
+    def test_simple_merge_on_different_columns(self):
+        base_df_1 = pd.DataFrame([{'n': i, 's1': str(i*2)} for i in range(10)])
+        df_1 = ps.DataFrame(base_df_1)
+        base_df_2 = pd.DataFrame([{'m': i, 's2': str(i*2)} for i in range(10)])
+        df_2 = ps.DataFrame(base_df_2)
+
+        merged = df_1.merge(df_2, left_on='n', right_on='m')
+        self.assertIsInstance(merged, Join)
+
+        sql = merged.sql()
+        self.assertEqual(sql,
+                         'SELECT {}.m, {}.n, {}.s1, {}.s2 FROM '
+                         '{} JOIN {} ON ({}.n) = ({}.m)'
+                         .format(df_2.name, df_1.name, df_1.name, df_2.name,
+                                 df_1.name, df_2.name, df_1.name, df_2.name))
+
+        expected = base_df_1.merge(base_df_2, left_on='n', right_on='m')
+        assertDataFrameEqualsPandas(merged, expected)
+
     def test_merge_with_dependencies(self):
+        self.maxDiff = None
         base_df_1 = pd.DataFrame([{'n': i, 's1': str(i*2)} for i in range(10)])
         base_df_2 = pd.DataFrame([{'n': i, 's2': str(i*2)} for i in range(10)])
         T1 = ps.DataFrame(base_df_1)
@@ -159,10 +183,12 @@ class TestDataFrame(unittest.TestCase):
 
         self.assertIsInstance(merged, Join)
         self.assertEqual(merged.sql(), 'WITH {} AS ({}), {} AS ({}) '
-                         'SELECT * FROM {} JOIN {} USING (n)'
+                         'SELECT {}.n, {}.s1, {}.s2 FROM '
+                         '{} JOIN {} ON ({}.n) = ({}.n)'
                          .format(S1.name, S1.sql(False),
                                  S2.name, S2.sql(False),
-                                 S1.name, S2.name))
+                                 S1.name, S1.name, S2.name,
+                                 S1.name, S2.name, S1.name, S2.name))
 
         expected = base_df_1[base_df_1['n'] < 8].merge(
             base_df_2[base_df_2['n'] >= 3], on='n')
@@ -233,9 +259,11 @@ class TestDataFrame(unittest.TestCase):
 
         # Now, the query for merged should not declare S1 again
         self.assertEqual(merged.sql(), 'WITH {} AS ({}) '
-                         'SELECT * FROM {} JOIN {} USING (n)'
+                         'SELECT {}.n, {}.s1, {}.s2 FROM '
+                         '{} JOIN {} ON ({}.n) = ({}.n)'
                          .format(S2.name, S2.sql(False),
-                                 S1.name, S2.name))
+                                 S1.name, S1.name, S2.name,
+                                 S1.name, S2.name, S1.name, S2.name))
 
         expected = base_df_1[base_df_1['n'] < 8].merge(
             base_df_2[base_df_2['n'] >= 3], on='n')

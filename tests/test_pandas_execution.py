@@ -104,6 +104,18 @@ class TestPandasExecution(unittest.TestCase):
         assertDataFrameEqualsPandas(merged_a, expected)
         assertDataFrameEqualsPandas(merged_b, expected)
 
+    def test_merge_on_different_columns(self):
+        base_df_1 = pd.DataFrame([{'n': i, 's1': str(i*2)} for i in range(10)])
+        df_1 = ps.DataFrame(base_df_1)
+        base_df_2 = pd.DataFrame([{'m': i, 's2': str(i*2)} for i in range(10)])
+        df_2 = ps.DataFrame(base_df_2)
+
+        merged_a = df_1.merge(df_2, left_on='n', right_on='m')
+        merged_b = ps.merge(df_1, df_2, left_on='n', right_on='m')
+        expected = pd.merge(base_df_1, base_df_2, left_on='n', right_on='m')
+        assertDataFrameEqualsPandas(merged_a, expected)
+        assertDataFrameEqualsPandas(merged_b, expected)
+
     def test_arithmetic(self):
         base_df = pd.DataFrame([{'n': i, 'm': 10-i} for i in range(10)])
         df = ps.DataFrame(base_df)

@@ -404,12 +404,9 @@ class DataFrame(BaseFrame):
     def sort_values(self, by, ascending=True):
         return OrderBy(self, cols=by, ascending=ascending)
 
-    def merge(self, other, on=None):
+    def merge(self, other, on=None, left_on=None, right_on=None):
         """TODO: support other pandas join arguments"""
-        if on is None:
-            raise NotImplementedError('Joins without key(s) are not supported')
-        else:
-            return Join(self, other, on)
+        return Join(self, other, on, left_on, right_on)
 
     def groupby(self, by, as_index=False):
         """TODO: support other pandas groupby arguments"""
@@ -573,28 +570,41 @@ class OrderBy(DataFrame):
 
 class Join(DataFrame):
     def __init__(self, source_1: DataFrame, source_2: DataFrame,
-                 join_keys, name=None):
+                 join_keys=None, left_keys=None, right_keys=None, name=None):
         super().__init__(name=name, sources=[source_1, source_2])
-        if isinstance(join_keys, str):
-            join_keys = [join_keys]
-        self.join_keys = join_keys
 
-        join_index = pd.Index(join_keys)
-        for source in self.sources:
+        if join_keys is None:
+            if left_keys is None or right_keys is None:
+                raise ValueError('No join keys provided!')
+        else:
+            left_keys = right_keys = join_keys
+        if isinstance(left_keys, str):
+            left_keys = [left_keys]
+        if isinstance(right_keys, str):
+            right_keys = [right_keys]
+
+        self.left_keys = left_keys
+        self.right_keys = right_keys
+
+        for source, keys in zip(self.sources, [left_keys, right_keys]):
+            join_index = pd.Index(keys)
             if len(join_index.difference(source.columns)) > 0:
                 raise ValueError("Source {} does not contain all join keys {}"
                                  .format(source.name, join_keys))
 
-        self.columns = source_1.columns.append(
-            source_2.columns.drop(join_keys))
+        self.columns = source_1.columns.union(source_2.columns)
 
-        self._sql_query = 'SELECT * FROM {} JOIN {} USING ({})' \
-            .format(self.sources[0].name, self.sources[1].name,
-                    ','.join(self.join_keys))
+        left_cols = [f'{source_1.name}.{c}' for c in left_keys]
+        right_cols = [f'{source_2.name}.{c}' for c in right_keys]
+        output_cols = [f'{source_1.name}.{c}' if c in source_1.columns
+                       else f'{source_2.name}.{c}' for c in self.columns]
+        self._sql_query = 'SELECT {} FROM {} JOIN {} ON ({}) = ({})' \
+            .format(', '.join(output_cols), source_1.name, source_2.name,
+                    ','.join(left_cols), ','.join(right_cols))
 
     def _pandas(self):
         return pd.merge(self.sources[0].result, self.sources[1].result,
-                        on=self.join_keys)
+                        left_on=self.left_keys, right_on=self.right_keys)
 
 
 class Union(DataFrame):
@@ -787,9 +797,10 @@ class Aggregator(DataFrame):
 ##############################################################################
 
 
-def merge(left: DataFrame, right: DataFrame, on=None):
+def merge(left: DataFrame, right: DataFrame, on=None,
+          left_on=None, right_on=None):
     """TODO: support other pandas join arguments"""
-    return Join(left, right, on)
+    return Join(left, right, on, left_on, right_on)
 
 
 def concat(objs: List[DataFrame]):
