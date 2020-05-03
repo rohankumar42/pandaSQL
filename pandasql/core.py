@@ -583,6 +583,10 @@ class Join(DataFrame):
         if isinstance(right_keys, str):
             right_keys = [right_keys]
 
+        if len(left_keys) != len(right_keys):
+            raise ValueError('Got conflicting number of keys for merge: '
+                             f'{len(left_keys)} and {len(right_keys)}')
+
         self.left_keys = left_keys
         self.right_keys = right_keys
 
@@ -594,13 +598,14 @@ class Join(DataFrame):
 
         self.columns = source_1.columns.union(source_2.columns)
 
-        left_cols = [f'{source_1.name}.{c}' for c in left_keys]
-        right_cols = [f'{source_2.name}.{c}' for c in right_keys]
-        output_cols = [f'{source_1.name}.{c}' if c in source_1.columns
-                       else f'{source_2.name}.{c}' for c in self.columns]
-        self._sql_query = 'SELECT {} FROM {} JOIN {} ON ({}) = ({})' \
+        join_cols = [f'({source_1.name}.{l} = {source_2.name}.{r})'
+                     for l, r in zip(left_keys, right_keys)]
+        output_cols = [f'{source_1.name}.{c} AS {c}' if c in source_1.columns
+                       else f'{source_2.name}.{c} AS {c}'
+                       for c in self.columns]
+        self._sql_query = 'SELECT {} FROM {} JOIN {} ON {}' \
             .format(', '.join(output_cols), source_1.name, source_2.name,
-                    ','.join(left_cols), ','.join(right_cols))
+                    ' AND '.join(join_cols))
 
     def _pandas(self):
         return pd.merge(self.sources[0].result, self.sources[1].result,

@@ -144,8 +144,8 @@ class TestDataFrame(unittest.TestCase):
 
         sql = merged.sql()
         self.assertEqual(sql,
-                         'SELECT {}.n, {}.s1, {}.s2 FROM '
-                         '{} JOIN {} ON ({}.n) = ({}.n)'
+                         'SELECT {}.n AS n, {}.s1 AS s1, {}.s2 AS s2 FROM '
+                         '{} JOIN {} ON ({}.n = {}.n)'
                          .format(df_1.name, df_1.name, df_2.name, df_1.name,
                                  df_2.name, df_1.name, df_2.name))
 
@@ -163,8 +163,8 @@ class TestDataFrame(unittest.TestCase):
 
         sql = merged.sql()
         self.assertEqual(sql,
-                         'SELECT {}.m, {}.n, {}.s1, {}.s2 FROM '
-                         '{} JOIN {} ON ({}.n) = ({}.m)'
+                         'SELECT {}.m AS m, {}.n AS n, {}.s1 AS s1, {}.s2 AS s2'  # noqa
+                         ' FROM {} JOIN {} ON ({}.n = {}.m)'
                          .format(df_2.name, df_1.name, df_1.name, df_2.name,
                                  df_1.name, df_2.name, df_1.name, df_2.name))
 
@@ -183,8 +183,8 @@ class TestDataFrame(unittest.TestCase):
 
         self.assertIsInstance(merged, Join)
         self.assertEqual(merged.sql(), 'WITH {} AS ({}), {} AS ({}) '
-                         'SELECT {}.n, {}.s1, {}.s2 FROM '
-                         '{} JOIN {} ON ({}.n) = ({}.n)'
+                         'SELECT {}.n AS n, {}.s1 AS s1, {}.s2 AS s2 FROM '
+                         '{} JOIN {} ON ({}.n = {}.n)'
                          .format(S1.name, S1.sql(False),
                                  S2.name, S2.sql(False),
                                  S1.name, S1.name, S2.name,
@@ -259,8 +259,8 @@ class TestDataFrame(unittest.TestCase):
 
         # Now, the query for merged should not declare S1 again
         self.assertEqual(merged.sql(), 'WITH {} AS ({}) '
-                         'SELECT {}.n, {}.s1, {}.s2 FROM '
-                         '{} JOIN {} ON ({}.n) = ({}.n)'
+                         'SELECT {}.n AS n, {}.s1 AS s1, {}.s2 AS s2 FROM '
+                         '{} JOIN {} ON ({}.n = {}.n)'
                          .format(S2.name, S2.sql(False),
                                  S1.name, S1.name, S2.name,
                                  S1.name, S2.name, S1.name, S2.name))
