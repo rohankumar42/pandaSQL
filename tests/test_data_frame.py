@@ -131,6 +131,7 @@ class TestDataFrame(unittest.TestCase):
                          .format(df_1.name, df_2.name, df_3.name))
 
         expected = pd.concat([base_df_1, base_df_2, base_df_3])
+        pd.testing.assert_index_equal(union.columns, expected.columns)
         assertDataFrameEqualsPandas(union, expected)
 
     def test_simple_merge(self):

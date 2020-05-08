@@ -616,11 +616,9 @@ class Union(DataFrame):
     def __init__(self, sources: List[DataFrame], name=None):
         super().__init__(name=name, sources=sources)
 
-        self.columns = pd.Index([])
-        schema = sources[0].columns
+        self.columns = sources[0].columns
         for source in sources:
-            self.columns = self.columns.append(source.columns)
-            if len(source.columns.symmetric_difference(schema)) > 0:
+            if len(source.columns.symmetric_difference(self.columns)) > 0:
                 raise ValueError("Cannot union sources with different schemas")
 
         self._sql_query = ' UNION ALL '.join('SELECT * FROM {}'
