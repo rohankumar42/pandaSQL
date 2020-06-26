@@ -535,6 +535,16 @@ class TestDataFrame(unittest.TestCase):
         assertDataFrameEqualsPandas(agg, base_agg)
         assertDataFrameEqualsPandas(ordered, base_ordered)
 
+    def test_rename_columns(self):
+        base_df = pd.DataFrame([{'n': i, 's': str(i*2)} for i in range(10)])
+        df = ps.DataFrame(base_df)
+        base_nc = base_df.rename(columns={'n': 'b'})
+        nc = df.rename(columns={'n': 'b'})
+
+        base_nc['b'] += 1
+        nc['b'] += 1
+        assertDataFrameEqualsPandas(nc, base_nc)
+
 
 if __name__ == "__main__":
     unittest.main()
