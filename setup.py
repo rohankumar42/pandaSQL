@@ -4,7 +4,7 @@ with open("README.md", "r") as fh:
     long_description = fh.read()
 
 requires = [
-    'pandas==0.25.3',
+    'pandas==1.0.5',
 ]
 
 setuptools.setup(
