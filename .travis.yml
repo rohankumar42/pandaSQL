@@ -5,6 +5,7 @@ python:
 install:
   - pip install .
   - pip install pytest pytest-cov coveralls  # For tests and coverage
+  - pip install --upgrade pytest
 script:
   - py.test --cov=./
 after_success:
