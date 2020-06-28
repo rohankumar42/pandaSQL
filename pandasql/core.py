@@ -398,6 +398,26 @@ class DataFrame(BaseFrame):
         # Update self to new object
         self.__dict__.update(new.__dict__)
 
+    def rename(self, columns):
+        if not isinstance(columns, dict):
+            raise TypeError('Column names must be of type dict, but found {}'
+                            .format(type(columns)))
+
+        old_cols = list(columns.keys())
+        new_cols = list(columns.values())
+
+        new = DataFrame(sources=[self])
+        new.update = UpdateNames(self, new, old_cols, new_names=new_cols)
+
+        # If column is new, add it to columns
+        new.columns = self.columns
+        for old_col, new_col in zip(old_cols, new_cols):
+            col_index = new.columns.get_loc(old_col)
+            new.columns = new.columns.drop(old_col)
+            new.columns = new.columns.insert(col_index, new_col)
+
+        return new
+
     def head(self, n=5):
         return self[:n]
 
@@ -471,6 +491,7 @@ class Update(object):
         self.value = _make_projection_or_constant(value, simple=True)
 
         columns = self.source.columns
+        col_index = columns.get_loc(col) if self.col in columns else len(columns)
         columns = columns.drop(self.col) if self.col in columns else columns
 
         val = self.value
@@ -480,7 +501,7 @@ class Update(object):
             val = val._operation_as_str()
 
         new_column = '{} AS {}'.format(val, self.col)
-        columns = columns.insert(len(columns), new_column)
+        columns = columns.insert(col_index, new_column)
 
         self._sql_query = 'SELECT {} FROM {}'.format(', '.join(columns),
                                                      self.source.name)
@@ -492,7 +513,26 @@ class Update(object):
         return 'Update({} to {}, {} <- {})'.format(self.source.name,
                                                    self.dest.name, self.col,
                                                    val)
+class UpdateNames(object):
+    def __init__(self, source: DataFrame, dest: DataFrame, cols: str, new_names: list):
+        self.source = source
+        self.dest = dest
+        self.cols = cols
 
+        columns = self.source.columns
+
+        if len(cols) != len(new_names):
+            raise ValueError('Length of columns and new names do not match')
+
+        for col, new_name in zip(cols, new_names):
+            col_index = columns.get_loc(col) if col in columns else len(columns)
+            columns = columns.drop(col) if col in columns else columns
+
+            new_column = '{} AS {}'.format(col, new_name)
+            columns = columns.insert(col_index, new_column)
+
+        self._sql_query = 'SELECT {} FROM {}'.format(', '.join(columns),
+                                                     self.source.name)
 
 class Projection(DataFrame, ArithmeticOperand):
     def __init__(self, source: DataFrame, col, name=None):
