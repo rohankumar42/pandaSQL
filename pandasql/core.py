@@ -1,3 +1,4 @@
+import datetime
 import pandas as pd
 from typing import List
 
@@ -197,6 +198,12 @@ class Criterion(BaseFrame):
         if source_2 is not None:
             sources.append(source_2)
 
+        self._type_cast = None
+        for source in sources:
+            if isinstance(source, datetime.datetime):
+                print('datetime found')
+                self._type_cast = 'Date'
+
         super().__init__(name=name, sources=sources)
 
     def __str__(self):
@@ -228,13 +235,19 @@ class Criterion(BaseFrame):
                               for col in source.columns)
             if len(source.columns) > 1:
                 attrs = '({})'.format(attrs)
-            return attrs
+            ret = attrs
         elif isinstance(source, Arithmetic):
-            return source._operation_as_str()
+            ret = source._operation_as_str()
         elif isinstance(source, Constant) or isinstance(source, Criterion):
-            return str(source)
+            ret = str(source)
         else:
             raise TypeError("Unexpected source type {}".format(type(source)))
+
+        # For example, change x to Date(x) for date comparisons
+        if self._type_cast is not None:
+            ret = f'{self.type_cast}({ret})'
+
+        return ret
 
 
 class ArithmeticOperand(object):
