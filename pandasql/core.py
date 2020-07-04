@@ -6,11 +6,12 @@ import pandas as pd
 from pandasql.utils import _is_supported_constant, _get_dependency_graph, \
     _topological_sort, _new_name
 from pandasql.sql_utils import get_sqlite_connection
+from pandasql.cost_model import CostModel
 
 DB_FILE = mkstemp("_pandasql.db")[1]
 SQL_CON = get_sqlite_connection(DB_FILE)
 OFFLOADING_STRATEGY = None
-
+COST_MODEL = CostModel()
 
 def require_result(func):
     '''Decorator for functions that require results to be ready'''
@@ -34,6 +35,7 @@ class BaseFrame(object):
         self.update = None
         self.columns = pd.Index([])
         self._sql_query = None
+        self._input_size = 0
 
         # For each source, add this as a dependent
         for source in self.sources:
@@ -59,7 +61,6 @@ class BaseFrame(object):
             # part of B's SQL query, or should A's result be first transferred
             # to SQLite? Probably not one-size-fits-all. Currently, the former
             # occurs every time.
-
             if should_offload_computation(self):
                 self._compute_sqlite()
             else:
@@ -67,7 +68,7 @@ class BaseFrame(object):
 
         return self.result
 
-    def _compute_pandas(self):
+    def _compute_pandas(self, store_on_sql=False):
         if self._cached_result is None:
             graph = _get_dependency_graph(self)
             ordered_deps = _topological_sort(graph)
@@ -91,6 +92,10 @@ class BaseFrame(object):
             # TODO(important): when should this result be offloaded to SQLite?
             self._cached_result = result
             self._computed_on_pandas = True
+
+            if store_on_sql:
+                self._cached_on_sqlite = True
+                result.to_sql(name=self.name, con=SQL_CON, index=False)
 
         return self.result
 
@@ -355,8 +360,9 @@ class DataFrame(BaseFrame):
 
         if df is not None and len(df) > 0:
             # Offload dataframe to SQLite
-            df.to_sql(name=self.name, con=SQL_CON, index=False)
+            df.to_sql(name=self.name, con=SQL_CON, index=False, chunksize=10000)
             self._cached_on_sqlite = True
+            self._input_size = self._cached_result.memory_usage(deep=True).sum()
 
             # Store columns
             self.columns = df.columns
@@ -1069,7 +1075,7 @@ class Abs(Arithmetic):
 def offloading_strategy(name=None):
     if name is not None:
         name = name.upper()
-        if name not in ['ALWAYS', 'NEVER']:
+        if name not in ['ALWAYS', 'NEVER', 'BEST']:
             raise ValueError(f'Unsupported offloading strategy: {name}')
 
         global OFFLOADING_STRATEGY
@@ -1084,8 +1090,10 @@ def should_offload_computation(df: BaseFrame):
         return True
     elif OFFLOADING_STRATEGY == 'NEVER':
         return False
-    else:
+    elif OFFLOADING_STRATEGY == 'BEST':
+        return COST_MODEL.should_offload(df)
         # TODO: put smart offloading logic here
+    else:
         raise NotImplementedError('Unsupported offloading strategy: {}'
                                   .format(OFFLOADING_STRATEGY))
 
