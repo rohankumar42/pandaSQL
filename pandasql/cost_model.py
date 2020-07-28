@@ -1,5 +1,5 @@
 from pandasql.utils import _get_dependency_graph
-import pandasql.core as ps
+import pandasql as ps
 
 class CostModel(object):
     def __init__(self, max_pandas_len=10, max_pandas_input=500_000_000 ): #500 MB
@@ -18,10 +18,10 @@ class CostModel(object):
         query_height = len(graph)
         estimated_input = sum([g._input_size for g in graph])
 
-        limits = [g.n for g in graph if isinstance(g, ps.Limit)]
-        filters = [g.criterion for g in graph if isinstance(g, ps.Selection)]
-        aggregations = [g.agg for g in graph if isinstance(g, ps.Aggregator)]
-        joins = [g.left_keys for g in graph if isinstance(g, ps.Join)]
+        limits = [g.n for g in graph if isinstance(g, ps.Core.Limit)]
+        filters = [g.criterion for g in graph if isinstance(g, ps.Core.Selection)]
+        aggregations = [g.agg for g in graph if isinstance(g, ps.Core.Aggregator)]
+        joins = [g.left_keys for g in graph if isinstance(g, ps.Core.Join)]
 
 
         # print(num_limits, num_filters, num_aggregations, num_joins)
@@ -56,3 +56,4 @@ class CostModel(object):
             # execution_estimates.append(pe, cost)
 
         # best_plan = min(execution_estimates, key = lambda t: t[1])
+
