@@ -1,12 +1,14 @@
-import pandas as pd
+import os
 from typing import List
+from tempfile import mkstemp
+import pandas as pd
 
 from pandasql.utils import _is_supported_constant, _get_dependency_graph, \
     _topological_sort, _new_name
 from pandasql.sql_utils import get_sqlite_connection
 
-
-SQL_CON = get_sqlite_connection()
+DB_FILE = mkstemp("_pandasql.db")[1]
+SQL_CON = get_sqlite_connection(DB_FILE)
 OFFLOADING_STRATEGY = None
 
 
@@ -491,7 +493,8 @@ class Update(object):
         self.value = _make_projection_or_constant(value, simple=True)
 
         columns = self.source.columns
-        col_index = columns.get_loc(col) if self.col in columns else len(columns)
+        col_index = columns.get_loc(
+            col) if self.col in columns else len(columns)
         columns = columns.drop(self.col) if self.col in columns else columns
 
         val = self.value
@@ -513,6 +516,8 @@ class Update(object):
         return 'Update({} to {}, {} <- {})'.format(self.source.name,
                                                    self.dest.name, self.col,
                                                    val)
+
+
 class UpdateNames(object):
     def __init__(self, source: DataFrame, dest: DataFrame, cols: str, new_names: list):
         self.source = source
@@ -525,7 +530,8 @@ class UpdateNames(object):
             raise ValueError('Length of columns and new names do not match')
 
         for col, new_name in zip(cols, new_names):
-            col_index = columns.get_loc(col) if col in columns else len(columns)
+            col_index = columns.get_loc(
+                col) if col in columns else len(columns)
             columns = columns.drop(col) if col in columns else columns
 
             new_column = '{} AS {}'.format(col, new_name)
@@ -533,6 +539,7 @@ class UpdateNames(object):
 
         self._sql_query = 'SELECT {} FROM {}'.format(', '.join(columns),
                                                      self.source.name)
+
 
 class Projection(DataFrame, ArithmeticOperand):
     def __init__(self, source: DataFrame, col, name=None):
@@ -1122,5 +1129,26 @@ def _make_projection_or_constant(x, simple=False, arithmetic=True):
         raise TypeError('Only constants and Projections are accepted')
 
 
-def stop():
+##############################################################################
+#                           Public SQLite Functions
+##############################################################################
+
+def get_database_file():
+    return DB_FILE
+
+
+def set_database_file(file_name, delete=False):
+    # Close previous connection
+    stop(delete=delete)
+
+    # Start new connection with new file
+    global DB_FILE
+    global SQL_CON
+    DB_FILE = file_name
+    SQL_CON = get_sqlite_connection(DB_FILE)
+
+
+def stop(delete=False):
     SQL_CON.close()
+    if delete:
+        os.remove(DB_FILE)
