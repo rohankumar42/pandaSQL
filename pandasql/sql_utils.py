@@ -91,8 +91,11 @@ CUSTOM_AGGREGATORS = {
 #                           SQL Connection Utils
 ##############################################################################
 
-def get_sqlite_connection():
-    con = sqlite3.connect(":memory:")
+def get_sqlite_connection(file_name):
+    # TODO: Figure out if it's possible to delete this file when the Python
+    # process terminates
+
+    con = sqlite3.connect(file_name)
 
     for name, (func, num_args) in CUSTOM_FUNCTIONS.items():
         con.create_function(name, num_args, func)
