@@ -35,7 +35,7 @@ class BaseFrame(object):
         self.update = None
         self.columns = pd.Index([])
         self._sql_query = None
-        self._input_size = 0
+        self._memory_usage = None
 
         # For each source, add this as a dependent
         for source in self.sources:
@@ -50,6 +50,20 @@ class BaseFrame(object):
             return self.process_result(self._cached_result)
         else:
             return self._cached_result
+
+    @property
+    def memory_usage(self):
+        if self._memory_usage is None:
+            if isinstance(self._cached_result, pd.DataFrame):
+                self._memory_usage = self._cached_result.memory_usage(
+                    deep=True, index=True).sum()
+            elif isinstance(self._cached_result, pd.Series):
+                self._memory_usage = self._cached_result.memory_usage(
+                    deep=True, index=True)
+            else:
+                # TODO: handle Aggregator, GroupByDataFrame, and GroupByProjection
+                self._memory_usage = None
+        return self._memory_usage
 
     def compute(self):
         # TODO: explore if there are situations when some part of the
@@ -362,7 +376,6 @@ class DataFrame(BaseFrame):
             # Offload dataframe to SQLite
             df.to_sql(name=self.name, con=SQL_CON, index=False, chunksize=10000)
             self._cached_on_sqlite = True
-            self._input_size = self._cached_result.memory_usage(deep=True).sum()
 
             # Store columns
             self.columns = df.columns

@@ -16,13 +16,13 @@ class CostModel(object):
         # possible_executions = []
         graph = _get_dependency_graph(df)
         query_height = len(graph)
-        estimated_input = sum([g._input_size for g in graph])
+        #TODO: Only sum input_sizes for nodes that we compute from (don't double count)
+        estimated_input = sum([g.memory_usage for g in graph])
 
-        limits = [g.n for g in graph if isinstance(g, ps.Core.Limit)]
-        filters = [g.criterion for g in graph if isinstance(g, ps.Core.Selection)]
-        aggregations = [g.agg for g in graph if isinstance(g, ps.Core.Aggregator)]
-        joins = [g.left_keys for g in graph if isinstance(g, ps.Core.Join)]
-
+        limits = [g.n for g in graph if isinstance(g, ps.core.Limit)]
+        filters = [g.criterion for g in graph if isinstance(g, ps.core.Selection)]
+        aggregations = [g.agg for g in graph if isinstance(g, ps.core.Aggregator)]
+        joins = [g.left_keys for g in graph if isinstance(g, ps.core.Join)]
 
         # print(num_limits, num_filters, num_aggregations, num_joins)
         print([type(g) for g in graph])
@@ -54,6 +54,4 @@ class CostModel(object):
             # execution time + possible data transfer time
             # we in
             # execution_estimates.append(pe, cost)
-
         # best_plan = min(execution_estimates, key = lambda t: t[1])
-

@@ -576,5 +576,13 @@ class TestDataFrame(unittest.TestCase):
 
         self.assertListEqual(list(df.columns), list(base_df.columns))
 
+    def test_memory_usage(self):
+        base_df = pd.DataFrame([{'n': i, 's': (i*2)} for i in range(10)])
+        df = ps.DataFrame(base_df)
+
+        df.compute()
+
+        self.assertEqual(df.memory_usage, base_df.memory_usage(deep=True,index=True).sum())
+
 if __name__ == "__main__":
     unittest.main()
