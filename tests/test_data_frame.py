@@ -561,10 +561,8 @@ class TestDataFrame(unittest.TestCase):
         nc = nc[nc['b'] < 9]
         base_nc = base_nc[base_nc['b'] < 9]
 
-
         assertDataFrameEqualsPandas(nc, base_nc)
         assertDataFrameEqualsPandas(nc, expected)
-
 
     def test_column_ordering(self):
         base_df = pd.DataFrame([{'n': i, 's': (i*2)} for i in range(10)])
@@ -582,7 +580,9 @@ class TestDataFrame(unittest.TestCase):
 
         df.compute()
 
-        self.assertEqual(df.memory_usage, base_df.memory_usage(deep=True,index=True).sum())
+        self.assertEqual(df.memory_usage,
+                         base_df.memory_usage(deep=True, index=True).sum())
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -11,7 +11,9 @@ from pandasql.cost_model import CostModel
 DB_FILE = mkstemp("_pandasql.db")[1]
 SQL_CON = get_sqlite_connection(DB_FILE)
 OFFLOADING_STRATEGY = None
+SQLITE_CHUNK_SIZE = 10000
 COST_MODEL = CostModel()
+
 
 def require_result(func):
     '''Decorator for functions that require results to be ready'''
@@ -374,7 +376,8 @@ class DataFrame(BaseFrame):
 
         if df is not None and len(df) > 0:
             # Offload dataframe to SQLite
-            df.to_sql(name=self.name, con=SQL_CON, index=False, chunksize=10000)
+            df.to_sql(name=self.name, con=SQL_CON,
+                      index=False, chunksize=SQLITE_CHUNK_SIZE)
             self._cached_on_sqlite = True
 
             # Store columns
