@@ -5,7 +5,7 @@ import pandasql as ps
 from .utils import assertDataFrameEqualsPandas
 
 
-class TestPandasExecution(unittest.TestCase):
+class TestOffloading(unittest.TestCase):
 
     def test_result_synchronization_simple(self):
         base_df = pd.DataFrame([{'n': i, 's': str(i*2)} for i in range(10)])
