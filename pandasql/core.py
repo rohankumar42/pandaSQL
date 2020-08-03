@@ -172,6 +172,12 @@ class BaseFrame(object):
     def all(self):
         return Aggregator('all', self)
 
+    def __getattr__(self, attr):
+        if attr in self.columns:
+            return self[attr]
+        else:
+            return self.__getattribute__(attr)
+
     def __str__(self):
         return self.name
 
