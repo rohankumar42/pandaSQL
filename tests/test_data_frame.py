@@ -584,5 +584,24 @@ class TestDataFrame(unittest.TestCase):
                          base_df.memory_usage(deep=True, index=True).sum())
 
 
+    def test_attr_access(self):
+        base_df = pd.DataFrame([{'n': i, 's': (i*2)} for i in range(10)])
+        df = ps.DataFrame(base_df)
+
+        assertDataFrameEqualsPandas(df.n, pd.DataFrame(base_df.n))
+
+    def test_complex_write_attr_access(self):
+        base_df = pd.DataFrame([{'n': i, 's': (i*2)} for i in range(10)])
+        df = ps.DataFrame(base_df)
+
+        base_df['p'] = base_df.s + 1
+        df['p'] = df.s + 1
+
+        base_df_1 = base_df.n
+        df_1 = df.n
+
+        assertDataFrameEqualsPandas(df.p, pd.DataFrame(base_df.p))
+        assertDataFrameEqualsPandas(df_1, pd.DataFrame(base_df_1))
+
 if __name__ == "__main__":
     unittest.main()
