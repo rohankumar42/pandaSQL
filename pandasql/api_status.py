@@ -1,4 +1,4 @@
-SUPPORTED_ON_SQLITE = {
+SUPPORTED_VIA_SQLITE = {
     'all',
     'any',
     'columns',

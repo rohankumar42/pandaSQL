@@ -47,6 +47,15 @@ class TestCostModel(unittest.TestCase):
         self.assertFalse(COST_MODEL.should_offload(df))
         self.assertTrue(COST_MODEL.should_offload(descendants[-1]))
 
+    def test_offloading_fallback_operation(self):
+        df = ps.DataFrame([{'n': i, 's': str(i % 2)} for i in range(100)])
+
+        largest = df.nlargest(10, 'n')
+        limit = largest[:3]
+
+        self.assertFalse(COST_MODEL.should_offload(largest))
+        self.assertFalse(COST_MODEL.should_offload(limit))
+
 
 if __name__ == "__main__":
     unittest.main()

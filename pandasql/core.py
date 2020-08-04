@@ -889,6 +889,7 @@ class FallbackOperation(DataFrame):
         self.op = op
         self.args = args
         self.kwargs = kwargs
+        self.columns = source.columns
 
     def _pandas(self):
         source_result = self.sources[0].result
