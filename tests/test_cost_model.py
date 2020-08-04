@@ -22,6 +22,11 @@ class TestCostModel(unittest.TestCase):
         self.assertTrue(COST_MODEL.should_offload(filtered))
         self.assertTrue(COST_MODEL.should_offload(limit))
 
+        limit.compute()
+        selection = limit['s']
+        # No pending join-limit operations for selection
+        self.assertFalse(COST_MODEL.should_offload(selection))
+
     def test_offloading_rule_limit_output(self):
         df = ps.DataFrame([{'n': i, 's': str(i % 2)} for i in range(100)])
 
@@ -48,6 +53,8 @@ class TestCostModel(unittest.TestCase):
         self.assertTrue(COST_MODEL.should_offload(descendants[-1]))
 
     def test_offloading_fallback_operation(self):
+        ps.offloading_strategy('BEST')
+
         df = ps.DataFrame([{'n': i, 's': str(i % 2)} for i in range(100)])
 
         largest = df.nlargest(10, 'n')
@@ -55,6 +62,10 @@ class TestCostModel(unittest.TestCase):
 
         self.assertFalse(COST_MODEL.should_offload(largest))
         self.assertFalse(COST_MODEL.should_offload(limit))
+
+        largest.compute()
+        # No more pending fallback operations now
+        self.assertTrue(COST_MODEL.should_offload(limit))
 
 
 if __name__ == "__main__":

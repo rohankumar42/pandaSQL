@@ -39,6 +39,10 @@ def _out_of_memory(df, graph):
 
 def _join_then_restrict(df, graph):
     for node in graph.keys():
+        # If result is already cached, no point in looking at it
+        if node.result is not None:
+            continue
+
         # TODO: Look at size of filter/limit for this decision?
         if isinstance(node, ps.core.Selection) or \
                 isinstance(node, ps.core.Limit):
@@ -61,7 +65,8 @@ def _deep_dependency_graph(df, graph):
 
 
 def _fallback_operation(df, graph):
-    fallbacks = _filter_ancestors(df, graph, lambda x:
+    # Rule does not apply if the result of fallback is already cached
+    fallbacks = _filter_ancestors(df, graph, lambda x: x.result is None and
                                   isinstance(x, ps.core.FallbackOperation),
                                   max_depth=None)
     if len(fallbacks) > 0:
