@@ -591,38 +591,17 @@ class TestDataFrame(unittest.TestCase):
         assertDataFrameEqualsPandas(df.n, pd.DataFrame(base_df.n))
 
     def test_complex_write_attr_access(self):
-        base_df_1 = pd.DataFrame([
-            {'a': i, 'b': j, 'c': 100*i, 'd': -j}
-            for i in range(3) for j in range(3)
-        ])
-        base_df_2 = pd.DataFrame([
-            {'a': i, 'b': j, 'e': 50*i, 'f': j}
-            for i in range(3) for j in range(3)
-        ])
-        df_1 = ps.DataFrame(base_df_1)
-        df_2 = ps.DataFrame(base_df_2)
+        base_df = pd.DataFrame([{'n': i, 's': (i*2)} for i in range(10)])
+        df = ps.DataFrame(base_df)
 
-        base_merged = base_df_1.merge(base_df_2, on=['a', 'b'])
-        base_merged['diff'] = base_merged['c'] - base_merged['e']
-        base_merged['key'] = base_merged['diff'] * \
-            (base_merged['d'] - base_merged['f'])
-        base_agg = base_merged.groupby('key', as_index=False)[['a', 'b']].sum()
-        base_agg['sum'] = base_agg['a'] + base_agg['b']
-        base_ordered = base_agg.sort_values(by='sum')
+        base_df['p'] = base_df.s + 1
+        df['p'] = df.s + 1
 
-        merged = df_1.merge(df_2, on=['a', 'b'])
-        merged['diff'] = merged['c'] - merged['e']
-        merged['key'] = merged['diff'] * \
-            (merged['d'] - merged['f'])
-        agg = merged.groupby('key')[['a', 'b']].sum()
-        agg['sum'] = agg['a'] + agg['b']
-        ordered = agg.sort_values(by='sum')
+        base_df_1 = base_df.n
+        df_1 = df.n
 
-        # All dependencies should have correct results
-
-        assertDataFrameEqualsPandas(df_1['a'], pd.DataFrame(base_df_1.a))
-        assertDataFrameEqualsPandas(agg.key, pd.DataFrame(base_agg.key))
-        assertDataFrameEqualsPandas(ordered.b, pd.DataFrame(base_ordered.b))
+        assertDataFrameEqualsPandas(df.p, pd.DataFrame(base_df.p))
+        assertDataFrameEqualsPandas(df_1, pd.DataFrame(base_df_1))
 
 if __name__ == "__main__":
     unittest.main()
