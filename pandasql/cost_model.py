@@ -60,11 +60,17 @@ def _limit_output(df, graph):
 def _deep_dependency_graph(df, graph):
     ancestors_by_depth = _get_ancestors_by_depth(df, graph)
     depth = len(ancestors_by_depth)
+    # TODO: move magic numbers like this one into some sort of config object
     if depth > 5:
         return True
 
 
 def _fallback_operation(df, graph):
+    # TODO: If some operations cannot be done without fallback, this method
+    # chooses to run the entire query in Pandas. We should instead explore
+    # running a subset of the query in SQLite, and then running Pandas-only
+    # parts in Pandas.
+
     # Rule does not apply if the result of fallback is already cached
     fallbacks = _filter_ancestors(df, graph, lambda x: x.result is None and
                                   isinstance(x, ps.core.FallbackOperation),

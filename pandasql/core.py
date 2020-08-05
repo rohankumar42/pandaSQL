@@ -174,13 +174,13 @@ class BaseFrame(object):
         return Aggregator('all', self)
 
     def __getattr__(self, attr):
-        if attr in self.columns:
-            return self[attr]
-
-        elif attr in SUPPORTED_VIA_FALLBACK:
+        if attr in SUPPORTED_VIA_FALLBACK:
             def wrapped_op(*args, **kwargs):
                 return FallbackOperation(*args, source=self, op=attr, **kwargs)
             return wrapped_op
+
+        elif attr in self.columns:
+            return self[attr]
 
         else:
             return self.__getattribute__(attr)
