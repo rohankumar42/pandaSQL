@@ -322,6 +322,24 @@ class TestPandasExecution(unittest.TestCase):
         pd.testing.assert_frame_equal(agg.result, base_agg)
         pd.testing.assert_frame_equal(ordered.result, base_ordered)
 
+    def test_drop_duplicates(self):
+        base_df = pd.DataFrame([{'n': int(i/2), 's': 0} for i in range(10)])
+        df = ps.DataFrame(base_df)
+
+        base_df_dup = base_df.drop_duplicates()
+        df_dup = df.drop_duplicates()
+
+        assertDataFrameEqualsPandas(df_dup, base_df_dup)
+
+    def test_drop_duplicates_projection(self):
+        base_df = pd.DataFrame([{'n': int(i/2), 's': 0} for i in range(10)])
+        df = ps.DataFrame(base_df)
+
+        base_df_dup = base_df['n'].drop_duplicates()
+        df_dup = df['n'].drop_duplicates()
+
+        assertDataFrameEqualsPandas(df_dup, pd.DataFrame(base_df_dup))
+
 
 if __name__ == "__main__":
     unittest.main()
