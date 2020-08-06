@@ -496,6 +496,18 @@ class DataFrame(BaseFrame):
         """TODO: support other pandas groupby arguments"""
         return GroupByDataFrame(self, by=by, as_index=as_index)
 
+    def drop_duplicates(self, subset=None, keep='first', inplace=False,
+                        ignore_index=False):
+        if subset is not None:
+            raise ValueError('Subset support has not been added')
+        if inplace is True:
+            raise ValueError('In place support has not been added')
+        if ignore_index is True:
+            raise ValueError('Index support has not been added')
+        if keep !='first':
+             raise ValueError('Keep support has not been added')
+        return Projection(self, self.columns.tolist(), drop_duplicates=True)
+
     @require_result
     def __str__(self):
         return str(self.result)
@@ -620,12 +632,17 @@ class Projection(DataFrame, ArithmeticMixin):
         if len(pd.Index(cols).difference(source.columns)) > 0:
             raise ValueError("Projection columns {} are not a subset of {}"
                              .format(cols, source.columns))
-        self.columns = source.columns[source.columns.isin(cols)]
 
-        self._sql_query = 'SELECT {} FROM {}'.format(', '.join(self.columns),
+        self.dedup = drop_duplicates
+        self.columns = source.columns[source.columns.isin(cols)]
+        dist = "DISTINCT " if self.dedup is True else ""
+        self._sql_query = 'SELECT {}{} FROM {}'.format(dist,
+                                                     ', '.join(self.columns),
                                                      self.sources[0].name)
 
     def _pandas(self):
+        if self.dedup is True:
+            return self.sources[0].result[self.columns].drop_duplicates()
         return self.sources[0].result[self.columns]
 
     def __hash__(self):

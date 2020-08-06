@@ -632,6 +632,5 @@ class TestDataFrame(unittest.TestCase):
         assertDataFrameEqualsPandas(df.p, pd.DataFrame(base_df.p))
         assertDataFrameEqualsPandas(df_1, pd.DataFrame(base_df_1))
 
-
 if __name__ == "__main__":
     unittest.main()
