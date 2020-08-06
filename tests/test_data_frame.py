@@ -632,5 +632,34 @@ class TestDataFrame(unittest.TestCase):
         assertDataFrameEqualsPandas(df.p, pd.DataFrame(base_df.p))
         assertDataFrameEqualsPandas(df_1, pd.DataFrame(base_df_1))
 
+    def test_drop_duplicates(self):
+        base_df = pd.DataFrame([{'n': int(i/2), 's': 0} for i in range(10)])
+        df = ps.DataFrame(base_df)
+
+        base_df_dup = base_df.drop_duplicates()
+        df_dup = df.drop_duplicates()
+
+        sql = df_dup.sql()
+        self.assertEqual(sql, 'SELECT DISTINCT n, s FROM {}'.format(df.name))
+
+        assertDataFrameEqualsPandas(df_dup, base_df_dup)
+
+    def test_drop_duplicates_projection(self):
+        base_df = pd.DataFrame([{'n': int(i/2), 's': 0} for i in range(10)])
+        df = ps.DataFrame(base_df)
+
+        base_df_n = base_df['n']
+        df_n = df['n']
+
+        base_df_dup = base_df_n.drop_duplicates()
+        df_dup = df_n.drop_duplicates()
+
+        sql = df_dup.sql()
+        self.assertEqual(sql, 'WITH {} AS (SELECT n FROM {}) SELECT DISTINCT n FROM {}'  # noqa
+                              .format(df_n.name, df.name, df_n.name))
+
+        assertDataFrameEqualsPandas(df_dup, pd.DataFrame(base_df_dup))
+
+
 if __name__ == "__main__":
     unittest.main()
