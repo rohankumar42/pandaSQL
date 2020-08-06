@@ -7,6 +7,7 @@ from pandasql.utils import _is_supported_constant, _get_dependency_graph, \
     _topological_sort, _new_name
 from pandasql.sql_utils import get_sqlite_connection
 from pandasql.cost_model import CostModel
+from pandasql.api_status import SUPPORTED_VIA_FALLBACK
 
 DB_FILE = mkstemp("_pandasql.db")[1]
 SQL_CON = get_sqlite_connection(DB_FILE)
@@ -173,8 +174,14 @@ class BaseFrame(object):
         return Aggregator('all', self)
 
     def __getattr__(self, attr):
-        if attr in self.columns:
+        if attr in SUPPORTED_VIA_FALLBACK:
+            def wrapped_op(*args, **kwargs):
+                return FallbackOperation(*args, source=self, op=attr, **kwargs)
+            return wrapped_op
+
+        elif attr in self.columns:
             return self[attr]
+
         else:
             return self.__getattribute__(attr)
 
@@ -547,7 +554,8 @@ class Update(object):
 
 
 class UpdateNames(object):
-    def __init__(self, source: DataFrame, dest: DataFrame, cols: str, new_names: list):
+    def __init__(self, source: DataFrame, dest: DataFrame, cols: str,
+                 new_names: list):
         self.source = source
         self.dest = dest
         self.cols = cols
@@ -871,6 +879,25 @@ class Aggregator(DataFrame):
 
 
 ##############################################################################
+#                       Catch-all for Pandas API Functions
+##############################################################################
+
+
+class FallbackOperation(DataFrame):
+    def __init__(self, *args, source: DataFrame, op: str, name=None, **kwargs):
+        super().__init__(name=name, sources=[source])
+        self.op = op
+        self.args = args
+        self.kwargs = kwargs
+        self.columns = source.columns
+
+    def _pandas(self):
+        source_result = self.sources[0].result
+        func = getattr(source_result, self.op)
+        return func(*self.args, **self.kwargs)
+
+
+##############################################################################
 #                           Misc. API Functions
 ##############################################################################
 
@@ -1162,6 +1189,7 @@ def _make_projection_or_constant(x, simple=False, arithmetic=True):
 ##############################################################################
 #                           Public SQLite Functions
 ##############################################################################
+
 
 def get_database_file():
     return DB_FILE
