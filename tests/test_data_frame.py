@@ -603,5 +603,23 @@ class TestDataFrame(unittest.TestCase):
         assertDataFrameEqualsPandas(df.p, pd.DataFrame(base_df.p))
         assertDataFrameEqualsPandas(df_1, pd.DataFrame(base_df_1))
 
+    def test_drop_duplicates(self):
+        base_df = pd.DataFrame([{'n': int(i/2), 's': 0} for i in range(10)])
+        df = ps.DataFrame(base_df)
+
+        base_df = base_df.drop_duplicates()
+        df = df.drop_duplicates()
+
+        assertDataFrameEqualsPandas(df, base_df)
+
+
+    def test_drop_duplicates_projection(self):
+        base_df = pd.DataFrame([{'n': int(i/2), 's': 0} for i in range(10)])
+        df = ps.DataFrame(base_df)
+
+        base_df = base_df['n'].drop_duplicates()
+        df = df['n'].drop_duplicates()
+
+        assertDataFrameEqualsPandas(df, pd.DataFrame(base_df))
 if __name__ == "__main__":
     unittest.main()
