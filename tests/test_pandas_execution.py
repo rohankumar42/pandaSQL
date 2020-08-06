@@ -129,6 +129,25 @@ class TestPandasExecution(unittest.TestCase):
         assertDataFrameEqualsPandas(df['n'] | 0 ^ ~df['m'],
                                     base_df['n'] | 0 ^ ~base_df['m'])
 
+    def test_string_operations(self):
+        # This is the same test as in TestDataFrame, run on Pandas this time
+        base_df = pd.DataFrame([{'n': str(i), 'm': chr(97+i)}
+                                for i in range(26)])
+        df = ps.DataFrame(base_df)
+
+        res = df[df['n'].isin(['1', '5', '8'])]
+        base_res = base_df[base_df['n'].isin(['1', '5', '8'])]
+        assertDataFrameEqualsPandas(res, base_res)
+
+        res = df[df['m'].str.contains('g')]
+        base_res = base_df[base_df['m'].str.contains('g', regex=False)]
+        assertDataFrameEqualsPandas(res, base_res)
+
+        res = df[df['n'].str.startswith('1') | df['n'].str.endswith('3')]
+        base_res = base_df[base_df['n'].str.startswith('1')
+                           | base_df['n'].str.endswith('3')]
+        assertDataFrameEqualsPandas(res, base_res)
+
     def test_aggregators(self):
         base_df = pd.DataFrame([{'m': i, 'n': 10-i} for i in range(0, 10)])
         df = ps.DataFrame(base_df)

@@ -205,6 +205,9 @@ class Constant(BaseFrame):
     def __str__(self):
         if isinstance(self._cached_result, str):
             return "'{}'".format(self._cached_result)
+        elif isinstance(self._cached_result, list):
+            values = [str(Constant(x)) for x in self._cached_result]
+            return '({})'.format(', '.join(values))
         else:
             return str(self._cached_result)
 
@@ -215,10 +218,10 @@ class Criterion(BaseFrame):
         # Simple criteria depend on comparisons between columns and/or
         # constants, whereas compound criteria depend on smaller criteria
         if simple:
-            assert(isinstance(source_1, ArithmeticOperand) or
+            assert(isinstance(source_1, ArithmeticMixin) or
                    isinstance(source_1, Constant))
             if source_2 is not None:
-                assert(isinstance(source_2, ArithmeticOperand) or
+                assert(isinstance(source_2, ArithmeticMixin) or
                        isinstance(source_2, Constant))
         else:
             assert(isinstance(source_1, Criterion))
@@ -245,7 +248,6 @@ class Criterion(BaseFrame):
         results = [s.result[s.columns[0]]
                    if isinstance(s, Projection) and len(s.columns) == 1
                    else s.result for s in self.sources]
-
         return self._pandas_func(*results)
 
     def __and__(self, other):
@@ -273,7 +275,7 @@ class Criterion(BaseFrame):
             raise TypeError("Unexpected source type {}".format(type(source)))
 
 
-class ArithmeticOperand(object):
+class ArithmeticMixin(object):
     def __add__(self, other):
         return Add(self, other)
 
@@ -364,6 +366,31 @@ class ArithmeticOperand(object):
     def __comparison(self, other, how_class):
         # TODO: move the _make call into Criterion.__init__
         return how_class(self, _make_projection_or_constant(other))
+
+    def isin(self, other: List[str]):
+        return IsIn(self, Constant(other))
+
+    @property
+    def str(self):
+        return StringOperator(self)
+
+
+class StringOperator(object):
+    def __init__(self, source):
+        self.source = source
+
+    def contains(self, pat: str, regex=False):
+        # TODO: support all of Pandas str.contains args
+        if regex:
+            raise ValueError('Regex support has not been added')
+
+        return Contains(self.source, Constant(pat), regex=regex)
+
+    def startswith(self, pat: str):
+        return StartsWith(self.source, Constant(pat))
+
+    def endswith(self, pat: str):
+        return EndsWith(self.source, Constant(pat))
 
 
 class DataFrame(BaseFrame):
@@ -577,7 +604,7 @@ class UpdateNames(object):
                                                      self.source.name)
 
 
-class Projection(DataFrame, ArithmeticOperand):
+class Projection(DataFrame, ArithmeticMixin):
     def __init__(self, source: DataFrame, col, name=None):
 
         if isinstance(col, str):
@@ -729,6 +756,7 @@ class Limit(DataFrame):
 ##############################################################################
 #                           GroupBy Operations
 ##############################################################################
+
 
 class GroupByDataFrame(BaseFrame):
     def __init__(self, source: DataFrame, by, as_index=False, name=None):
@@ -974,12 +1002,48 @@ class Not(Criterion):
         return 'NOT ({})'.format(self.sources[0])
 
 
+class IsIn(Criterion):
+    def __init__(self, source_1, source_2, name=None):
+        super().__init__('IN', lambda x, y: x.isin(y),
+                         source_1, source_2, name=name)
+
+
+class Contains(Criterion):
+    def __init__(self, source_1, source_2, regex=False, name=None):
+        super().__init__('LIKE', lambda x, y: x.str.contains(y, regex=regex),
+                         source_1, source_2, name=name)
+
+    def __str__(self):
+        return "{} LIKE '%{}%'".format(self._source_to_str(self.sources[0]),
+                                       self.sources[1].result)
+
+
+class StartsWith(Criterion):
+    def __init__(self, source_1, source_2, name=None):
+        super().__init__('LIKE', lambda x, y: x.str.startswith(y),
+                         source_1, source_2, name=name)
+
+    def __str__(self):
+        return "{} LIKE '{}%'".format(self._source_to_str(self.sources[0]),
+                                      self.sources[1].result)
+
+
+class EndsWith(Criterion):
+    def __init__(self, source_1, source_2, name=None):
+        super().__init__('LIKE', lambda x, y: x.str.endswith(y),
+                         source_1, source_2, name=name)
+
+    def __str__(self):
+        return "{} LIKE '%{}'".format(self._source_to_str(self.sources[0]),
+                                      self.sources[1].result)
+
+
 ##############################################################################
 #                           Arithmetic Classes
 ##############################################################################
 
 
-class Arithmetic(DataFrame, ArithmeticOperand):
+class Arithmetic(DataFrame, ArithmeticMixin):
     def __init__(self, operation, pandas_func, operand_1, operand_2=None,
                  inline=False, name=None):
 

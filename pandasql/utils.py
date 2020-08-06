@@ -4,7 +4,7 @@ from collections import defaultdict
 
 
 # TODO: add more supported types
-SUPPORTED_TYPES = [int, float, str]
+SUPPORTED_TYPES = [int, float, str, list]
 
 # TODO: switch to uuids when done testing
 COUNT = 0
