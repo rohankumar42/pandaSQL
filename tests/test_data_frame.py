@@ -379,6 +379,36 @@ class TestDataFrame(unittest.TestCase):
 
         assertDataFrameEqualsPandas(res, expected)
 
+    def test_string_operations_on_columns(self):
+        base_df = pd.DataFrame([{'n': str(i), 'm': chr(97+i)}
+                                for i in range(26)])
+        df = ps.DataFrame(base_df)
+
+        res = df[df['n'].isin(['1', '5', '8'])]
+        base_res = base_df[base_df['n'].isin(['1', '5', '8'])]
+
+        self.assertEqual(res.sql(),
+                         "SELECT * FROM {} WHERE {}.n IN ('1', '5', '8')"
+                         .format(df.name, df.name))
+        assertDataFrameEqualsPandas(res, base_res)
+
+        res = df[df['m'].str.contains('g')]
+        base_res = base_df[base_df['m'].str.contains('g', regex=False)]
+
+        self.assertEqual(res.sql(),
+                         "SELECT * FROM {} WHERE {}.m LIKE '%g%'"
+                         .format(df.name, df.name))
+        assertDataFrameEqualsPandas(res, base_res)
+
+        res = df[df['n'].str.startswith('1') | df['n'].str.endswith('3')]
+        base_res = base_df[base_df['n'].str.startswith('1')
+                           | base_df['n'].str.endswith('3')]
+
+        self.assertEqual(res.sql(),
+                         "SELECT * FROM {} WHERE {}.n LIKE '1%' OR {}.n LIKE '%3'"  # noqa
+                         .format(df.name, df.name, df.name))
+        assertDataFrameEqualsPandas(res, base_res)
+
     def test_column_sums(self):
         base_df = pd.DataFrame([{'m': i, 'n': 10-i} for i in range(1, 11)])
         df = ps.DataFrame(base_df)
@@ -583,7 +613,6 @@ class TestDataFrame(unittest.TestCase):
         self.assertEqual(df.memory_usage,
                          base_df.memory_usage(deep=True, index=True).sum())
 
-
     def test_attr_access(self):
         base_df = pd.DataFrame([{'n': i, 's': (i*2)} for i in range(10)])
         df = ps.DataFrame(base_df)
@@ -602,6 +631,7 @@ class TestDataFrame(unittest.TestCase):
 
         assertDataFrameEqualsPandas(df.p, pd.DataFrame(base_df.p))
         assertDataFrameEqualsPandas(df_1, pd.DataFrame(base_df_1))
+
 
 if __name__ == "__main__":
     unittest.main()
