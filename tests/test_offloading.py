@@ -31,6 +31,15 @@ class TestOffloading(unittest.TestCase):
         limit.compute()
         assertDataFrameEqualsPandas(limit, base_limit)
 
+    def test_run_fallback_on_sqlite(self):
+        return NotImplemented
+
+    def test_run_with_missing_dependencies_pandas(self):
+        return NotImplemented
+
+    def test_run_with_missing_dependencies_sqlite(self):
+        return NotImplemented
+
 
 if __name__ == "__main__":
     unittest.main()
