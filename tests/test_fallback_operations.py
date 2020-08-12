@@ -7,10 +7,9 @@ from .utils import assertDataFrameEqualsPandas
 
 class TestFallbackOperations(unittest.TestCase):
 
-    def setUp(self):
+    def test_nlargest_nsmallest(self):
         ps.offloading_strategy('NEVER')
 
-    def test_nlargest_nsmallest(self):
         base_df = pd.DataFrame([{'n': i, 's': str(i*2)} for i in range(30)])
         df = ps.DataFrame(base_df)
 
@@ -23,6 +22,15 @@ class TestFallbackOperations(unittest.TestCase):
         smallest = df.nsmallest(n=5, columns='n')
         self.assertIsInstance(smallest, ps.core.FallbackOperation)
         assertDataFrameEqualsPandas(smallest, base_smallest)
+
+    def test_run_fallback_on_sqlite(self):
+        ps.offloading_strategy('ALWAYS')
+
+        base_df = pd.DataFrame([{'n': i, 's': str(i*2)} for i in range(30)])
+        df = ps.DataFrame(base_df)
+
+        largest = df.nlargest(n=10, columns='n')
+        self.assertRaises(RuntimeError, lambda: largest.compute())
 
 
 if __name__ == "__main__":

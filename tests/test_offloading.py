@@ -31,6 +31,38 @@ class TestOffloading(unittest.TestCase):
         limit.compute()
         assertDataFrameEqualsPandas(limit, base_limit)
 
+    def test_run_with_missing_dependencies_sqlite(self):
+        ps.offloading_strategy('ALWAYS')
+
+        base_df = pd.DataFrame([{'n': i, 's': str(i*2)} for i in range(10)])
+        base_selection = base_df[base_df['n'] >= 5]
+
+        # Should run on SQLite since original data was offloaded
+        df = ps.DataFrame(base_df, offload=True)
+        selection = df[df['n'] >= 5]
+        assertDataFrameEqualsPandas(selection, base_selection)
+
+        # Should not run on SQLite since original data was not offloaded
+        df = ps.DataFrame(base_df, offload=False)
+        selection = df[df['n'] >= 5]
+        self.assertRaises(RuntimeError, lambda: selection.compute())
+
+    def test_run_with_missing_dependencies_pandas(self):
+        ps.offloading_strategy('NEVER')
+
+        base_df = pd.DataFrame([{'n': i, 's': str(i*2)} for i in range(10)])
+        base_selection = base_df[base_df['n'] >= 5]
+
+        # Should run on Pandas since original data exists
+        df = ps.DataFrame(base_df)
+        selection = df[df['n'] >= 5]
+        assertDataFrameEqualsPandas(selection, base_selection)
+
+        # Should not run on Pandas since original data does not exist
+        df._cached_result = None
+        selection = df[df['n'] >= 5]
+        self.assertRaises(RuntimeError, lambda: selection.compute())
+
 
 if __name__ == "__main__":
     unittest.main()
