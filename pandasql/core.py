@@ -403,7 +403,7 @@ class StringOperator(object):
 
 class DataFrame(BaseFrame):
     def __init__(self, data=None, name=None, sources=None, deep_copy=False,
-                 offload=True):
+                 offload=True, loaded_on_sqlite=False):
         super().__init__(name=name, sources=sources)
         df = None
 
@@ -431,6 +431,10 @@ class DataFrame(BaseFrame):
 
             # Store columns
             self.columns = df.columns
+
+        elif loaded_on_sqlite is True:
+            self.columns = df.columns
+            self._cached_on_sqlite = True
 
     def __getitem__(self, x):
         if isinstance(x, str) or isinstance(x, list):
