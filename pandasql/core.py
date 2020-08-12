@@ -118,17 +118,23 @@ class BaseFrame(object):
 
         return self.result
 
-    def _compute_sqlite(self):
-        if self._cached_result is None:
+    def _compute_sqlite(self, to_pandas=True):
+
+        if not to_pandas:
+            raise NotImplementedError('TODO: Support for not bringing back '
+                                      'computed results has not been added.')
+
+        if not self._cached_on_sqlite:
             # Compute result and store in SQLite table
             query = self.sql(dependencies=True)
             compute_query = 'CREATE TABLE {} AS {}'.format(self.name, query)
             SQL_CON.execute(compute_query)
+            self._cached_on_sqlite = True
 
+        if self._cached_result is None and to_pandas:
             # Read table as Pandas DataFrame
             read_query = 'SELECT * FROM {}'.format(self.name)
             self._cached_result = pd.read_sql_query(read_query, con=SQL_CON)
-            self._cached_on_sqlite = True
             self.columns = self._cached_result.columns
 
         return self.result
@@ -1250,7 +1256,8 @@ def _ensure_computable(df, on):
         # or all of its dependencies are computable
         if is_cached(dep):
             computable[dep] = True
-        elif all(computable[source] for source in dep.sources):
+        elif len(dep.sources) > 0 and \
+                all(computable[source] for source in dep.sources):
             computable[dep] = True
         else:
             computable[dep] = False
@@ -1268,8 +1275,8 @@ def _ensure_computable(df, on):
                                       max_depth=None)
         if len(fallbacks) > 0:
             raise RuntimeError(f'The given computation cannot be run on {on} '
-                               f'because {fallbacks} pending operations are '
-                               'only supported via Pandas.')
+                               f'because {len(fallbacks)} pending operations '
+                               'are only supported via Pandas.')
 
 
 ##############################################################################
