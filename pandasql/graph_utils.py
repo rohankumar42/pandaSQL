@@ -1,25 +1,5 @@
-# import uuid
 from queue import Queue
 from collections import defaultdict
-
-
-# TODO: add more supported types
-SUPPORTED_TYPES = [int, float, str, list]
-
-# TODO: switch to uuids when done testing
-COUNT = 0
-
-
-def _is_supported_constant(x):
-    return any(isinstance(x, t) for t in SUPPORTED_TYPES)
-
-
-def _new_name():
-    # name = uuid.uuid4().hex
-    global COUNT
-    name = 'T' + str(COUNT)
-    COUNT += 1
-    return name
 
 
 def _get_dependency_graph(table):
@@ -66,3 +46,33 @@ def _topological_sort(graph):
                            .format(len(graph), len(results)))
 
     return results
+
+
+def _filter_ancestors(df, graph, predicate, max_depth=None):
+    ancestors_by_depth = _get_ancestors_by_depth(df, graph, max_depth)
+    filtered = []
+    for ancestors in ancestors_by_depth.values():
+        filtered.extend(filter(predicate, ancestors))
+    return filtered
+
+
+def _get_ancestors_by_depth(df, graph, max_depth=None):
+    max_depth = len(graph) if max_depth is None else max_depth
+
+    visited = {df}
+    ancestors_by_depth = {0: {df}}
+
+    depth = 0
+    while depth < max_depth and \
+            len(ancestors_by_depth[depth]) > 0:  # There are unexplored nodes
+
+        cur_layer = ancestors_by_depth[depth]
+        depth += 1
+        ancestors_by_depth[depth] = set()
+        for cur in cur_layer:
+            for neighbor in graph[cur]:
+                if neighbor not in visited:
+                    visited.add(neighbor)
+                    ancestors_by_depth[depth].add(neighbor)
+
+    return ancestors_by_depth

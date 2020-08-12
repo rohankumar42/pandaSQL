@@ -1,5 +1,6 @@
-from pandasql.utils import _get_dependency_graph
 import pandasql as ps
+from pandasql.graph_utils import _get_dependency_graph, _filter_ancestors, \
+    _get_ancestors_by_depth
 
 
 class CostModel(object):
@@ -29,7 +30,7 @@ class CostModel(object):
 ##############################################################################
 
 
-MAX_DEPENDENCY_DISTANCE = 1   # TODO: How much should we allow? Maybe 2-3?
+FARTHEST_DEPENDENCE = 1   # TODO: How much should we allow? Maybe 2-3?
 
 
 def _out_of_memory(df, graph):
@@ -47,7 +48,8 @@ def _join_then_restrict(df, graph):
         if isinstance(node, ps.core.Selection) or \
                 isinstance(node, ps.core.Limit):
             join_ancestors = _filter_ancestors(node, graph, lambda x:
-                                               isinstance(x, ps.core.Join))
+                                               isinstance(x, ps.core.Join),
+                                               max_depth=FARTHEST_DEPENDENCE)
             if len(join_ancestors) > 0:
                 return True
 
@@ -87,39 +89,3 @@ OFFLOADING_RULES = [
     _deep_dependency_graph,
     # TODO: more rules
 ]
-
-
-##############################################################################
-#                       Common Utility Functions
-##############################################################################
-
-
-def _filter_ancestors(df, graph, predicate,
-                      max_depth=MAX_DEPENDENCY_DISTANCE):
-    ancestors_by_depth = _get_ancestors_by_depth(df, graph, max_depth)
-    filtered = []
-    for ancestors in ancestors_by_depth.values():
-        filtered.extend(filter(predicate, ancestors))
-    return filtered
-
-
-def _get_ancestors_by_depth(df, graph, max_depth=None):
-    max_depth = len(graph) if max_depth is None else max_depth
-
-    visited = {df}
-    ancestors_by_depth = {0: {df}}
-
-    depth = 0
-    while depth < max_depth and \
-            len(ancestors_by_depth[depth]) > 0:  # There are unexplored nodes
-
-        cur_layer = ancestors_by_depth[depth]
-        depth += 1
-        ancestors_by_depth[depth] = set()
-        for cur in cur_layer:
-            for neighbor in graph[cur]:
-                if neighbor not in visited:
-                    visited.add(neighbor)
-                    ancestors_by_depth[depth].add(neighbor)
-
-    return ancestors_by_depth

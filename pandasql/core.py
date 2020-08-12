@@ -3,8 +3,8 @@ from typing import List
 from tempfile import mkstemp
 import pandas as pd
 
-from pandasql.utils import _is_supported_constant, _get_dependency_graph, \
-    _topological_sort, _new_name
+from pandasql.graph_utils import _get_dependency_graph, _topological_sort, \
+    _filter_ancestors
 from pandasql.sql_utils import get_sqlite_connection
 from pandasql.cost_model import CostModel
 from pandasql.api_status import SUPPORTED_VIA_FALLBACK
@@ -79,13 +79,15 @@ class BaseFrame(object):
             # to SQLite? Probably not one-size-fits-all. Currently, the former
             # occurs every time.
             if should_offload_computation(self):
+                _ensure_computable(self, on='sqlite')
                 self._compute_sqlite()
             else:
+                _ensure_computable(self, on='pandas')
                 self._compute_pandas()
 
         return self.result
 
-    def _compute_pandas(self, store_on_sql=False):
+    def _compute_pandas(self, offload=False):
         if self._cached_result is None:
             graph = _get_dependency_graph(self)
             ordered_deps = _topological_sort(graph)
@@ -110,23 +112,29 @@ class BaseFrame(object):
             self._cached_result = result
             self._computed_on_pandas = True
 
-            if store_on_sql:
+            if offload:
                 self._cached_on_sqlite = True
                 result.to_sql(name=self.name, con=SQL_CON, index=False)
 
         return self.result
 
-    def _compute_sqlite(self):
-        if self._cached_result is None:
+    def _compute_sqlite(self, to_pandas=True):
+
+        if not to_pandas:
+            raise NotImplementedError('TODO: Support for not bringing back '
+                                      'computed results has not been added.')
+
+        if not self._cached_on_sqlite:
             # Compute result and store in SQLite table
             query = self.sql(dependencies=True)
             compute_query = 'CREATE TABLE {} AS {}'.format(self.name, query)
             SQL_CON.execute(compute_query)
+            self._cached_on_sqlite = True
 
+        if self._cached_result is None and to_pandas:
             # Read table as Pandas DataFrame
             read_query = 'SELECT * FROM {}'.format(self.name)
             self._cached_result = pd.read_sql_query(read_query, con=SQL_CON)
-            self._cached_on_sqlite = True
             self.columns = self._cached_result.columns
 
         return self.result
@@ -394,7 +402,8 @@ class StringOperator(object):
 
 
 class DataFrame(BaseFrame):
-    def __init__(self, data=None, name=None, sources=None, deep_copy=False):
+    def __init__(self, data=None, name=None, sources=None, deep_copy=False,
+                 offload=True):
         super().__init__(name=name, sources=sources)
         df = None
 
@@ -415,10 +424,10 @@ class DataFrame(BaseFrame):
                             .format(type(data)))
 
         if df is not None and len(df) > 0:
-            # Offload dataframe to SQLite
-            df.to_sql(name=self.name, con=SQL_CON,
-                      index=False, chunksize=SQLITE_CHUNK_SIZE)
-            self._cached_on_sqlite = True
+            if offload:  # Offload dataframe to SQLite
+                df.to_sql(name=self.name, con=SQL_CON,
+                          index=False, chunksize=SQLITE_CHUNK_SIZE)
+                self._cached_on_sqlite = True
 
             # Store columns
             self.columns = df.columns
@@ -1229,9 +1238,69 @@ def should_offload_computation(df: BaseFrame):
                                   .format(OFFLOADING_STRATEGY))
 
 
+def _ensure_computable(df, on):
+    if on == 'pandas':
+        def is_cached(x): return x._cached_result is not None
+    elif on == 'sqlite':
+        def is_cached(x): return x._cached_on_sqlite
+    else:
+        raise ValueError(f'Unknown computation mechanism: {on}')
+
+    graph = _get_dependency_graph(df)
+    ordered_deps = _topological_sort(graph)
+
+    computable = {}
+    faults = 0
+    for dep in ordered_deps:
+        # A DataFrame is computable if it is already cached,
+        # or all of its dependencies are computable
+        if is_cached(dep):
+            computable[dep] = True
+        elif len(dep.sources) > 0 and \
+                all(computable[source] for source in dep.sources):
+            computable[dep] = True
+        else:
+            computable[dep] = False
+            faults += 1
+
+    if faults > 0:
+        raise RuntimeError(f'The given computation cannot be run on {on} '
+                           f'because {faults} dependencies cannot be computed')
+
+    # If there are any pending operations that are Pandas-only
+    # (i.e., supported via fallbacks), then we cannot run on SQLite.
+    if on == 'sqlite':
+        fallbacks = _filter_ancestors(df, graph, lambda x: not is_cached(x) and
+                                      isinstance(x, FallbackOperation),
+                                      max_depth=None)
+        if len(fallbacks) > 0:
+            raise RuntimeError(f'The given computation cannot be run on {on} '
+                               f'because {len(fallbacks)} pending operations '
+                               'are only supported via Pandas.')
+
+
 ##############################################################################
 #                           Utility Functions
 ##############################################################################
+
+
+# TODO: add more supported types
+SUPPORTED_TYPES = [int, float, str, list]
+
+# TODO: switch to uuids when done testing
+COUNT = 0
+
+
+def _is_supported_constant(x):
+    return any(isinstance(x, t) for t in SUPPORTED_TYPES)
+
+
+def _new_name():
+    # name = uuid.uuid4().hex
+    global COUNT
+    name = 'T' + str(COUNT)
+    COUNT += 1
+    return name
 
 
 def _define_dependencies(df: DataFrame):

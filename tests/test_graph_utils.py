@@ -1,10 +1,10 @@
 import unittest
 import pandas as pd
 import pandasql as ps
-from pandasql.utils import _get_dependency_graph, _topological_sort
+from pandasql.graph_utils import _get_dependency_graph, _topological_sort
 
 
-class TestUtils(unittest.TestCase):
+class TestGraphUtils(unittest.TestCase):
 
     def test_get_dependency_graph(self):
         base_df_1 = pd.DataFrame([{'n': i, 's1': str(i*2)} for i in range(10)])
@@ -35,6 +35,8 @@ class TestUtils(unittest.TestCase):
         self.assertEqual(ordered[0].name, df_1.name)
         self.assertEqual(ordered[1].name, df_2.name)
         self.assertEqual(ordered[2].name, merged.name)
+
+    # TODO: test other graph utils
 
 
 if __name__ == "__main__":
