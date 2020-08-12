@@ -432,8 +432,7 @@ class DataFrame(BaseFrame):
             # Store columns
             self.columns = df.columns
 
-        elif loaded_on_sqlite is True:
-            self.columns = df.columns
+        elif loaded_on_sqlite:
             self._cached_on_sqlite = True
 
     def __getitem__(self, x):
