@@ -1,5 +1,5 @@
 import unittest
-
+import psutil
 import pandas as pd
 import pandasql as ps
 from .utils import assertDataFrameEqualsPandas
@@ -62,6 +62,32 @@ class TestOffloading(unittest.TestCase):
         df._cached_result = None
         selection = df[df['n'] >= 5]
         self.assertRaises(RuntimeError, lambda: selection.compute())
+
+    def test_result_out_of_memory(self):
+        ps.offloading_strategy('ALWAYS')
+
+        size = 10 ** 4
+
+        base_df = pd.DataFrame([{'n': i, 's': str(i*2)} for i in range(size)])
+        base_selection = base_df[base_df['n'] >= 5]
+        base_limit = base_selection.head()
+
+        df = ps.DataFrame(base_df)
+
+        memory_thresh = 10 ** 4
+        new_factor = memory_thresh / psutil.virtual_memory().available
+        old_factor = ps.memory_utils.SAFETY_FACTOR
+        ps.memory_utils.SAFETY_FACTOR = new_factor
+
+        # Should fail since the result is too big to be brought back
+        selection = df[df['n'] >= 5]
+        self.assertRaises(MemoryError, lambda: selection.compute())
+
+        # Should run since the result is small enough to be brought back
+        limit = selection.head()
+        assertDataFrameEqualsPandas(limit, base_limit)
+
+        ps.memory_utils.SAFETY_FACTOR = old_factor
 
 
 if __name__ == "__main__":

@@ -1,6 +1,6 @@
 import unittest
 import os
-
+import psutil
 from tempfile import mkstemp
 
 import pandasql as ps
@@ -17,8 +17,7 @@ class TestIO(unittest.TestCase):
         ps.offloading_strategy('ALWAYS')
         arr = np.random.randint(low=0, high=100_000_000, size=(25_000, 2))
         np.savetxt(self.FILE_NAME, arr, delimiter=',', fmt='%i',
-                   header='c0,c1',  # noqa
-                   comments='')
+                   header='c0,c1', comments='')
         self.addCleanup(os.remove, self.FILE_NAME)
 
     def test_loading_csv(self):
@@ -30,7 +29,7 @@ class TestIO(unittest.TestCase):
 
         assertDataFrameEqualsPandas(df, base_df)
 
-    def test_loading_csv_sql(self):
+    def test_loading_csv_sqlite(self):
         df = ps.read_csv(self.FILE_NAME, sql_load=True)
         base_df = pd.read_csv(self.FILE_NAME)
 
@@ -39,18 +38,21 @@ class TestIO(unittest.TestCase):
 
         assertDataFrameEqualsPandas(df, base_df)
 
-    def test_loading_csv_sql_chunk(self):
-        old_threshold = ps.io.MEMORY_THRESHOLD
-        ps.io.MEMORY_THRESHOLD = 1
+    def test_loading_csv_in_chunks(self):
+        memory_thresh = 10 ** 4
+        new_factor = memory_thresh / psutil.virtual_memory().available
+        old_factor = ps.memory_utils.SAFETY_FACTOR
+        ps.memory_utils.SAFETY_FACTOR = new_factor
 
         df = ps.read_csv(self.FILE_NAME)
         base_df = pd.read_csv(self.FILE_NAME)
+
+        ps.memory_utils.SAFETY_FACTOR = old_factor
 
         df['c0'] += 1
         base_df['c0'] += 1
 
         assertDataFrameEqualsPandas(df, base_df)
-        ps.io.MEMORY_THRESHOLD = old_threshold
 
 
 if __name__ == "__main__":
