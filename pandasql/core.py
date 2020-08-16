@@ -7,6 +7,8 @@ from pandasql.graph_utils import _get_dependency_graph, _topological_sort, \
     _filter_ancestors
 from pandasql.sql_utils import get_sqlite_connection
 from pandasql.cost_model import CostModel
+from pandasql.memory_utils import _free_memory, \
+    _estimate_pandas_memory_from_sqlite
 from pandasql.api_status import SUPPORTED_VIA_FALLBACK
 
 DB_FILE = mkstemp("_pandasql.db")[1]
@@ -35,6 +37,7 @@ class BaseFrame(object):
         self._cached_result = None
         self._cached_on_sqlite = False
         self._computed_on_pandas = False
+        self._out_of_memory = False
         self.update = None
         self.columns = pd.Index([])
         self._sql_query = None
@@ -47,7 +50,13 @@ class BaseFrame(object):
     @property
     def result(self):
         if self._cached_result is None:
-            return None
+            if self._out_of_memory:
+                raise MemoryError('The result of this dataframe is too big to '
+                                  'fit in memory. Please try accessing a '
+                                  'smaller subset of the data you need, '
+                                  'e.g., using df.head().')
+            else:
+                return None
         elif hasattr(self, 'process_result') and not self._computed_on_pandas:
             # If result was not computed on Pandas, post-process result
             return self.process_result(self._cached_result)
@@ -118,11 +127,7 @@ class BaseFrame(object):
 
         return self.result
 
-    def _compute_sqlite(self, to_pandas=True):
-
-        if not to_pandas:
-            raise NotImplementedError('TODO: Support for not bringing back '
-                                      'computed results has not been added.')
+    def _compute_sqlite(self):
 
         if not self._cached_on_sqlite:
             # Compute result and store in SQLite table
@@ -131,11 +136,18 @@ class BaseFrame(object):
             SQL_CON.execute(compute_query)
             self._cached_on_sqlite = True
 
-        if self._cached_result is None and to_pandas:
-            # Read table as Pandas DataFrame
-            read_query = 'SELECT * FROM {}'.format(self.name)
-            self._cached_result = pd.read_sql_query(read_query, con=SQL_CON)
-            self.columns = self._cached_result.columns
+        if self._cached_result is None:
+
+            estimated = _estimate_pandas_memory_from_sqlite(self.name)
+            if estimated > _free_memory():
+                # Cannot bring back result because it's too big for memory
+                self._out_of_memory = True
+            else:
+                # Read table as Pandas DataFrame
+                read_query = 'SELECT * FROM {}'.format(self.name)
+                self._cached_result = pd.read_sql_query(
+                    read_query, con=SQL_CON)
+                self.columns = self._cached_result.columns
 
         return self.result
 

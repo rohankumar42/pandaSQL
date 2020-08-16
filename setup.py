@@ -5,6 +5,7 @@ with open("README.md", "r") as fh:
 
 requires = [
     'pandas==1.0.5',
+    'psutil>=5.7.2'
 ]
 
 setuptools.setup(
