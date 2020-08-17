@@ -103,4 +103,13 @@ def get_sqlite_connection(file_name):
     for name, (cls, num_args) in CUSTOM_AGGREGATORS.items():
         con.create_aggregate(name, num_args, cls)
 
+    c = con.cursor()
+    c.execute(''' PRAGMA compile_options; ''')
+    options = c.fetchall()
+
+    dbstat_enabled = [o for o in options if 'ENABLE_DBSTAT_VTAB' in o]
+
+    if len(dbstat_enabled) == 0:
+        raise ImportError('sqlite3 must be compiled with '
+                          'SQLITE_ENABLE_DBSTAT_VTAB to use pandaSQL')
     return con
