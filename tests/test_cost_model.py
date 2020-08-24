@@ -38,7 +38,7 @@ class TestCostModel(unittest.TestCase):
 
     def test_offloading_rule_deep_dependency_graph(self):
         depth = 10
-        size = 10 ** 5
+        size = 10 ** 2
         step = size // depth
 
         df = ps.DataFrame([{'n': i, 's': str(i*2)} for i in range(size)])

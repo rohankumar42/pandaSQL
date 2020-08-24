@@ -42,6 +42,7 @@ class BaseFrame(object):
         self.columns = pd.Index([])
         self._sql_query = None
         self._memory_usage = None
+        self.stats = None
 
         # For each source, add this as a dependent
         for source in self.sources:
@@ -93,6 +94,10 @@ class BaseFrame(object):
             else:
                 _ensure_computable(self, on='pandas')
                 self._compute_pandas()
+
+            # Compute stats about result, if it exists on Pandas
+            if isinstance(self._cached_result, pd.DataFrame):
+                self.stats = collect_stats(self._cached_result)
 
         return self.result
 
@@ -446,6 +451,10 @@ class DataFrame(BaseFrame):
 
         elif loaded_on_sqlite:
             self._cached_on_sqlite = True
+
+        # Compute stats about data, if it exists on Pandas
+        if isinstance(self._cached_result, pd.DataFrame):
+            self.stats = collect_stats(self._cached_result)
 
     def __getitem__(self, x):
         if isinstance(x, str) or isinstance(x, list):
@@ -1350,6 +1359,11 @@ def _make_projection_or_constant(x, simple=False, arithmetic=True):
         return x
     else:
         raise TypeError('Only constants and Projections are accepted')
+
+
+def collect_stats(df: pd.DataFrame):
+    # TODO: also collect stats for str and datetime columns
+    return df.describe([q / 100 for q in range(5, 100, 5)])
 
 
 ##############################################################################

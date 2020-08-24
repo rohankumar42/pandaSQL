@@ -2,7 +2,8 @@ import subprocess
 
 import pandas as pd
 from pandasql.core import DB_FILE, SQL_CON, DataFrame, _new_name
-from pandasql.memory_utils import _estimate_pandas_memory_from_csv, _free_memory
+from pandasql.memory_utils import _estimate_pandas_memory_from_csv, \
+    _free_memory
 
 SAMPLE_LINES = 1000
 CHUNKSIZE = 10_000
