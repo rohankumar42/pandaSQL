@@ -2,16 +2,19 @@ from queue import Queue
 from collections import defaultdict
 
 
-def _get_dependency_graph(table):
+def _get_dependency_graph(df, on='sqlite'):
     dependencies = {}
 
     def add_dependencies(child):
         dependencies[child] = list(child.sources)
+        if on == 'pandas':
+            dependencies[child] += list(child.pandas_sources)
+
         for parent in dependencies[child]:
             if parent not in dependencies:
                 add_dependencies(parent)
 
-    add_dependencies(table)
+    add_dependencies(df)
     return dependencies
 
 

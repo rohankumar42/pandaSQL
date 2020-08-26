@@ -29,10 +29,11 @@ def require_result(func):
 
 
 class BaseFrame(object):
-    def __init__(self, name=None, sources=None):
+    def __init__(self, name=None, sources=None, pandas_sources=None):
         self.name = name or _new_name()
         # TODO: deduplicate sources
         self.sources = sources or []
+        self.pandas_sources = pandas_sources or []
         self.dependents = []
         self._cached_result = None
         self._cached_on_sqlite = False
@@ -103,7 +104,7 @@ class BaseFrame(object):
 
     def _compute_pandas(self, offload=False):
         if self._cached_result is None:
-            graph = _get_dependency_graph(self)
+            graph = _get_dependency_graph(self, on='pandas')
             ordered_deps = _topological_sort(graph)
 
             # Compute all dependencies in order (via Pandas)
@@ -419,9 +420,10 @@ class StringOperator(object):
 
 
 class DataFrame(BaseFrame):
-    def __init__(self, data=None, name=None, sources=None, deep_copy=False,
-                 offload=True, loaded_on_sqlite=False):
-        super().__init__(name=name, sources=sources)
+    def __init__(self, data=None, name=None, sources=None, pandas_sources=None,
+                 deep_copy=False, offload=True, loaded_on_sqlite=False):
+        super().__init__(name=name, sources=sources,
+                         pandas_sources=pandas_sources)
         df = None
 
         # If data provided, result is already ready
@@ -685,17 +687,15 @@ class Projection(DataFrame, ArithmeticMixin):
 
 class Selection(DataFrame):
     def __init__(self, source: DataFrame, criterion: Criterion, name=None):
-        super().__init__(name=name, sources=[source])
-        self.criterion = criterion
+        super().__init__(name=name, sources=[source],
+                         pandas_sources=[criterion])
         self.columns = source.columns
 
         self._sql_query = 'SELECT * FROM {} WHERE {}'.format(
-            self.sources[0].name, self.criterion)
+            self.sources[0].name, self.pandas_sources[0])
 
     def _pandas(self):
-        # self.criterion might not already be computed since it is not
-        # technically a "source" (dependency). So, explicitly compute it.
-        return self.sources[0].result[self.criterion.compute()]
+        return self.sources[0].result[self.pandas_sources[0].result]
 
 
 class OrderBy(DataFrame):
@@ -1270,7 +1270,7 @@ def _ensure_computable(df, on):
     else:
         raise ValueError(f'Unknown computation mechanism: {on}')
 
-    graph = _get_dependency_graph(df)
+    graph = _get_dependency_graph(df, on=on)
     ordered_deps = _topological_sort(graph)
 
     computable = {}
@@ -1328,13 +1328,14 @@ def _new_name():
 
 
 def _define_dependencies(df: DataFrame):
-    graph = _get_dependency_graph(df)
+    graph = _get_dependency_graph(df, on='sqlite')
     ordered_deps = _topological_sort(graph)
 
     # Do NOT define a dependency t if any of the following is true:
     #   (1) t is the current df
     #   (2) t is already cached on SQLite
     #   (3) t is a GroupByDataFrame object
+    #   (4) t is a Criterion object (won't be in graph)
     common_table_exprs = [
         '{} AS ({})'.format(t.name, t.sql(dependencies=False))
         for t in ordered_deps
