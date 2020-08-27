@@ -118,10 +118,7 @@ class BaseFrame(object):
                 result = self._pandas()
             else:   # Trigger the lazy write that is pending for this object
                 result = self.update.source.result.copy(deep=True)
-
-                # The value to be written may not have been computed because
-                # it is not technically a "source". So, compute it explicitly.
-                result[self.update.col] = self.update.value.compute()
+                result[self.update.col] = self.update.value.result
 
             # TODO(important): when should this result be offloaded to SQLite?
             self._cached_result = result
@@ -484,9 +481,14 @@ class DataFrame(BaseFrame):
             dependent.sources.remove(self)
             dependent.sources.append(old)
 
+        # Ensure value is another column or a constant
+        value = _make_projection_or_constant(value, simple=True)
+
         # Create a new DataFrame (which will become self), and add old
         # as a source, tracking the update that is being done
-        new = DataFrame(sources=[old])
+        # Add value as a Pandas-only source so in the case of Pandas execution,
+        # it is computed before executing this write
+        new = DataFrame(sources=[old], pandas_sources=[value])
         new.update = Update(old, new, col, value)
 
         # If column is new, add it to columns
@@ -599,11 +601,11 @@ class Update(object):
         self.source = source
         self.dest = dest
         self.col = col
-        self.value = _make_projection_or_constant(value, simple=True)
+        self.value = value
 
         columns = self.source.columns
-        col_index = columns.get_loc(
-            col) if self.col in columns else len(columns)
+        col_index = columns.get_loc(col) if self.col in columns \
+            else len(columns)
         columns = columns.drop(self.col) if self.col in columns else columns
 
         val = self.value
