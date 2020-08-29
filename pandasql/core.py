@@ -1,4 +1,5 @@
 import os
+import sys
 from typing import List
 from tempfile import mkstemp
 import pandas as pd
@@ -70,10 +71,10 @@ class BaseFrame(object):
         if self._memory_usage is None:
             if isinstance(self._cached_result, pd.DataFrame):
                 self._memory_usage = self._cached_result.memory_usage(
-                    deep=True, index=True).sum()
-            elif isinstance(self._cached_result, pd.Series):
-                self._memory_usage = self._cached_result.memory_usage(
                     deep=True, index=True)
+            elif isinstance(self._cached_result, pd.Series):
+                usage = self._cached_result.memory_usage(deep=True, index=True)
+                self._memory_usage = pd.DataFrame(usage)
             else:
                 # TODO: handle Aggregator, GroupByDataFrame, GroupByProjection
                 self._memory_usage = None
@@ -157,6 +158,9 @@ class BaseFrame(object):
     def _pandas(self):
         raise NotImplementedError("To be implemented by subclasses")
 
+    def _predict_memory_from_sources(self):
+        raise NotImplementedError("To be implemented by subclasses")
+
     def sql(self, dependencies=True):
         query = []
 
@@ -234,6 +238,8 @@ class Constant(BaseFrame):
         else:
             return str(self._cached_result)
 
+    def _predict_memory_from_sources(self):
+        return sys.getsizeof(self._cached_result)
 
 class Criterion(BaseFrame):
     def __init__(self, operation, pandas_func, source_1, source_2=None,
@@ -267,10 +273,18 @@ class Criterion(BaseFrame):
                                  self.operation,
                                  self._source_to_str(self.sources[1]))
 
+    def _predict_memory_from_sources(self):
+        projs = [s for s in self.sources if isinstance(s, Projection)]
+        assert len(projs) > 0
+        nrows = projs[0].sources[0].stats.iloc[:, 0]['count']
+        return nrows    # assuming 1 byte/bool?
+
     def _pandas(self):
         results = [s.result[s.columns[0]]
                    if isinstance(s, Projection) and len(s.columns) == 1
                    else s.result for s in self.sources]
+        print('ayyys')
+        print(self._pandas_func)
         return self._pandas_func(*results)
 
     def __and__(self, other):
@@ -545,6 +559,9 @@ class DataFrame(BaseFrame):
             raise ValueError('Keep support has not been added')
         return Projection(self, self.columns.tolist(), drop_duplicates=True)
 
+    def _predict_memory_from_sources(self):
+        return self.memory_usage.sum()
+
     @require_result
     def __str__(self):
         return str(self.result)
@@ -620,6 +637,11 @@ class Update(object):
         self._sql_query = 'SELECT {} FROM {}'.format(', '.join(columns),
                                                      self.source.name)
 
+    def _predict_memory_from_sources(self):
+        old_mem = self.source.memory_usage.sum()
+        new_mem = self.source.stats[0]['count'] * 8  # TODO figure out type?
+        return old_mem + new_mem
+
     def __str__(self):
         val = self.value
         if isinstance(val, Projection):
@@ -652,6 +674,9 @@ class UpdateNames(object):
         self._sql_query = 'SELECT {} FROM {}'.format(', '.join(columns),
                                                      self.source.name)
 
+    def _predict_memory_from_sources(self):
+        return self.source.memory_usage.sum()
+
 
 class Projection(DataFrame, ArithmeticMixin):
     def __init__(self, source: DataFrame, col, name=None,
@@ -683,6 +708,9 @@ class Projection(DataFrame, ArithmeticMixin):
             return self.sources[0].result[self.columns].drop_duplicates()
         return self.sources[0].result[self.columns]
 
+    def _predict_memory_from_sources(self):
+        return self.sources[0].memory_usage[self.columns].sum()
+
     def __hash__(self):
         return super().__hash__()
 
@@ -695,6 +723,14 @@ class Selection(DataFrame):
 
         self._sql_query = 'SELECT * FROM {} WHERE {}'.format(
             self.sources[0].name, self.pandas_sources[0])
+
+    def _predict_memory_from_sources(self):
+        print(self.pandas_sources[0])
+        print(self.pandas_sources[0].result)
+        new_rows = self.pandas_sources[0].result.sum()
+        prev_rows = self.sources[0].stats.iloc[:, 0]['count']
+        kept_ratio = new_rows / prev_rows
+        return kept_ratio * self.sources[0].memory_usage.sum()
 
     def _pandas(self):
         return self.sources[0].result[self.pandas_sources[0].result]
@@ -725,6 +761,9 @@ class OrderBy(DataFrame):
 
         self._sql_query = 'SELECT * FROM {} ORDER BY {}' \
             .format(self.sources[0].name, ', '.join(order_by))
+
+    def _predict_memory_from_sources(self):
+        return self.sources[0].memory_usage.sum()
 
     def _pandas(self):
         return self.sources[0].result.sort_values(self.order_cols,
@@ -770,6 +809,49 @@ class Join(DataFrame):
             .format(', '.join(output_cols), source_1.name, source_2.name,
                     ' AND '.join(join_cols))
 
+    def _predict_memory_from_sources(self):
+        def merge_size(l_frame, r_frame, join_key, how='inner'):
+            l_groups = l_frame.groupby(join_key).size()
+            r_groups = r_frame.groupby(join_key).size()
+            l_keys = set(l_groups.index)
+            r_keys = set(r_groups.index)
+            intersection = r_keys & l_keys
+            l_diff = l_keys - intersection
+            r_diff = r_keys - intersection
+
+            l_nan = len(l_frame[l_frame[join_key] != l_frame[join_key]])
+            r_nan = len(r_frame[r_frame[join_key] != r_frame[join_key]])
+            l_nan = 1 if l_nan == 0 and r_nan != 0 else l_nan
+            r_nan = 1 if r_nan == 0 and l_nan != 0 else r_nan
+
+            sizes = [(l_groups[group_name] * r_groups[group_name]) for group_name in intersection]
+            sizes += [l_nan * r_nan]
+
+            l_size = [l_groups[group_name] for group_name in l_diff]
+            r_size = [r_groups[group_name] for group_name in r_diff]
+            if how == 'inner':
+                return sum(sizes)
+            elif how == 'left':
+                return sum(sizes + l_size)
+            elif how == 'right':
+                return sum(sizes + r_size)
+            return sum(sizes + l_size + r_size)
+
+        # TODO: handle multi keys better, likely needs to be optimized
+        #       https://github.com/pandas-dev/pandas/issues/15068
+
+        nrows = min([merge_size(self.sources[0], self.sources[1], rk)
+                    for rk in self.right_keys])
+
+        new_row_size = 0
+        for c in self.columns:
+            if c in self.sources[0].columns:
+                new_row_size += self.sources[0].memory_usage[c] / self.sources[0].stats[c]['count']
+            else:
+                new_row_size += self.sources[1].memory_usage[c] / self.sources[1].stats[c]['count']
+
+        return new_row_size * nrows
+
     def _pandas(self):
         return pd.merge(self.sources[0].result, self.sources[1].result,
                         left_on=self.left_keys, right_on=self.right_keys)
@@ -788,6 +870,9 @@ class Union(DataFrame):
                                              .format(source.name)
                                              for source in self.sources)
 
+    def _predict_memory_from_sources(self):
+        return sum([s.memory_usage.sum() for s in self.sources])
+
     def _pandas(self):
         return pd.concat([s.result for s in self.sources])
 
@@ -801,6 +886,12 @@ class Limit(DataFrame):
 
         self._sql_query = 'SELECT * FROM {} LIMIT {}'.format(
             self.sources[0].name, self.n)
+
+    def _predict_memory_from_sources(self):
+        prev_mem = self.sources[0].memory_usage.sum()
+        shrink_ratio = self.n / self.sources[0].stats[0]['count']
+        sample_mem = prev_mem * shrink_ratio
+        return sample_mem
 
     def _pandas(self):
         return self.sources[0].result[:self.n]
@@ -923,6 +1014,10 @@ class Aggregator(DataFrame):
         else:
             self.final_type = None
 
+    def _predict_memory_from_sources(self):
+        # if self.grouped:    #TODO: what does it mean if not grouped?
+        raise NotImplementedError
+
     def _pandas(self):
         if self.grouped:
             result = getattr(self.sources[0].result, self.agg)()
@@ -971,6 +1066,9 @@ class FallbackOperation(DataFrame):
         self.args = args
         self.kwargs = kwargs
         self.columns = source.columns
+
+    def _predict_memory_from_sources(self):
+        raise NotImplementedError
 
     def _pandas(self):
         source_result = self.sources[0].result
@@ -1122,6 +1220,9 @@ class Arithmetic(DataFrame, ArithmeticMixin):
 
         self._sql_query = 'SELECT {} AS res FROM {}'.format(
             self._operation_as_str(), self.sources[0].name)
+
+    def _predict_memory_from_sources(self):
+        return self.sources[0].memory_usage
 
     def _pandas(self):
         # Operands might not be already computed since they are not technically
