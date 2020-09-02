@@ -45,6 +45,7 @@ class BaseFrame(object):
         self._sql_query = None
         self._memory_usage = None
         self.stats = None
+        self._unique = None
 
         # For each source, add this as a dependent
         for source in self.sources:
@@ -99,6 +100,7 @@ class BaseFrame(object):
             # Compute stats about result, if it exists on Pandas
             if isinstance(self._cached_result, pd.DataFrame):
                 self.stats = collect_stats(self._cached_result)
+                self._unique = collect_unique(self._cached_result)
 
         return self.result
 
@@ -277,7 +279,8 @@ class Criterion(BaseFrame):
         projs = [s for s in self.sources if isinstance(s, Projection)]
         assert len(projs) > 0
         nrows = projs[0].sources[0].stats.iloc[:, 0]['count']
-        return nrows    # assuming 1 byte/bool?
+        index_usage = projs[0].sources[0].memory_usage['Index']
+        return index_usage + nrows    # assuming 1 byte/bool?
 
     def _pandas(self):
         results = [s.result[s.columns[0]]
@@ -466,6 +469,7 @@ class DataFrame(BaseFrame):
         # Compute stats about data, if it exists on Pandas
         if isinstance(self._cached_result, pd.DataFrame):
             self.stats = collect_stats(self._cached_result)
+            self._unique = collect_unique(self._cached_result)
 
     def __getitem__(self, x):
         if isinstance(x, str) or isinstance(x, list):
@@ -707,7 +711,8 @@ class Projection(DataFrame, ArithmeticMixin):
         return self.sources[0].result[self.columns]
 
     def _predict_memory_from_sources(self):
-        return self.sources[0].memory_usage[self.columns].sum()
+        index_usage = self.sources[0].memory_usage['Index']
+        return index_usage + self.sources[0].memory_usage[self.columns].sum()
 
     def __hash__(self):
         return super().__hash__()
@@ -807,6 +812,7 @@ class Join(DataFrame):
 
     def _predict_memory_from_sources(self):
         def merge_size(l_frame, r_frame, join_key, how='inner'):
+            # TODO: have to ensure that l_frame and r_frame are already computed
             l_groups = l_frame.groupby(join_key).size()
             r_groups = r_frame.groupby(join_key).size()
             l_keys = set(l_groups.index)
@@ -929,6 +935,9 @@ class GroupByDataFrame(BaseFrame):
         return 'GroupBy({}, by={})'.format(self.sources[0].name,
                                            self.groupby_cols)
 
+    def _predict_memory_from_sources(self):
+        return 1000 # TODO: just a guess
+
     def _pandas(self):
         grouped = self.sources[0].result.groupby(self.groupby_cols,
                                                  as_index=self.as_index)
@@ -962,6 +971,8 @@ class GroupByProjection(GroupByDataFrame):
             .format(self.sources[0].name, self.groupby_cols,
                     self.columns.to_list())
 
+    def _predict_memory_from_sources(self):
+        return 1000 # TODO: just a guess
 
 ##############################################################################
 #                                Aggregators
@@ -1014,8 +1025,12 @@ class Aggregator(DataFrame):
             self.final_type = None
 
     def _predict_memory_from_sources(self):
-        # if self.grouped:    # TODO: what does it mean if not grouped?
-        raise NotImplementedError
+        if self.grouped:
+            num_groups = min(self.sources[0]._unique[self.groupby_cols])
+        else:
+            num_groups = 1
+        prev_rows = self.sources[0].stats.iloc[:, 0]['count']
+        return num_groups / prev_rows * self.sources[0].memory_usage.sum()
 
     def _pandas(self):
         if self.grouped:
@@ -1468,6 +1483,9 @@ def collect_stats(df: pd.DataFrame):
     # TODO: also collect stats for str and datetime columns
     return df.describe([q / 100 for q in range(5, 100, 5)])
 
+def collect_unique(df: pd.DataFrame):
+    # TODO: also collect stats for str and datetime columns
+    return df.nunique()
 
 ##############################################################################
 #                           Public SQLite Functions
