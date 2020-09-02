@@ -66,7 +66,6 @@ class BaseFrame(object):
         else:
             return self._cached_result
 
-    @property
     def memory_usage(self):
         if self._memory_usage is None:
             if isinstance(self._cached_result, pd.DataFrame):
@@ -241,6 +240,7 @@ class Constant(BaseFrame):
     def _predict_memory_from_sources(self):
         return sys.getsizeof(self._cached_result)
 
+
 class Criterion(BaseFrame):
     def __init__(self, operation, pandas_func, source_1, source_2=None,
                  name=None, simple=True):
@@ -283,8 +283,6 @@ class Criterion(BaseFrame):
         results = [s.result[s.columns[0]]
                    if isinstance(s, Projection) and len(s.columns) == 1
                    else s.result for s in self.sources]
-        print('ayyys')
-        print(self._pandas_func)
         return self._pandas_func(*results)
 
     def __and__(self, other):
@@ -560,7 +558,7 @@ class DataFrame(BaseFrame):
         return Projection(self, self.columns.tolist(), drop_duplicates=True)
 
     def _predict_memory_from_sources(self):
-        return self.memory_usage.sum()
+        return self.memory_usage().sum()
 
     @require_result
     def __str__(self):
@@ -638,8 +636,8 @@ class Update(object):
                                                      self.source.name)
 
     def _predict_memory_from_sources(self):
-        old_mem = self.source.memory_usage.sum()
-        new_mem = self.source.stats[0]['count'] * 8  # TODO figure out type?
+        old_mem = self.source.memory_usage().sum()
+        new_mem = self.source.stats[0]['count'] * 8  # TODO: figure out type
         return old_mem + new_mem
 
     def __str__(self):
@@ -675,7 +673,7 @@ class UpdateNames(object):
                                                      self.source.name)
 
     def _predict_memory_from_sources(self):
-        return self.source.memory_usage.sum()
+        return self.source.memory_usage().sum()
 
 
 class Projection(DataFrame, ArithmeticMixin):
@@ -725,12 +723,10 @@ class Selection(DataFrame):
             self.sources[0].name, self.pandas_sources[0])
 
     def _predict_memory_from_sources(self):
-        print(self.pandas_sources[0])
-        print(self.pandas_sources[0].result)
         new_rows = self.pandas_sources[0].result.sum()
         prev_rows = self.sources[0].stats.iloc[:, 0]['count']
         kept_ratio = new_rows / prev_rows
-        return kept_ratio * self.sources[0].memory_usage.sum()
+        return kept_ratio * self.sources[0].memory_usage().sum()
 
     def _pandas(self):
         return self.sources[0].result[self.pandas_sources[0].result]
@@ -763,7 +759,7 @@ class OrderBy(DataFrame):
             .format(self.sources[0].name, ', '.join(order_by))
 
     def _predict_memory_from_sources(self):
-        return self.sources[0].memory_usage.sum()
+        return self.sources[0].memory_usage().sum()
 
     def _pandas(self):
         return self.sources[0].result.sort_values(self.order_cols,
@@ -824,7 +820,8 @@ class Join(DataFrame):
             l_nan = 1 if l_nan == 0 and r_nan != 0 else l_nan
             r_nan = 1 if r_nan == 0 and l_nan != 0 else r_nan
 
-            sizes = [(l_groups[group_name] * r_groups[group_name]) for group_name in intersection]
+            sizes = [(l_groups[group_name] * r_groups[group_name])
+                     for group_name in intersection]
             sizes += [l_nan * r_nan]
 
             l_size = [l_groups[group_name] for group_name in l_diff]
@@ -838,17 +835,19 @@ class Join(DataFrame):
             return sum(sizes + l_size + r_size)
 
         # TODO: handle multi keys better, likely needs to be optimized
-        #       https://github.com/pandas-dev/pandas/issues/15068
+        # https://github.com/pandas-dev/pandas/issues/15068
 
         nrows = min([merge_size(self.sources[0], self.sources[1], rk)
-                    for rk in self.right_keys])
+                     for rk in self.right_keys])
 
         new_row_size = 0
         for c in self.columns:
             if c in self.sources[0].columns:
-                new_row_size += self.sources[0].memory_usage[c] / self.sources[0].stats[c]['count']
+                new_row_size += self.sources[0].memory_usage[c] / \
+                    self.sources[0].stats[c]['count']
             else:
-                new_row_size += self.sources[1].memory_usage[c] / self.sources[1].stats[c]['count']
+                new_row_size += self.sources[1].memory_usage[c] / \
+                    self.sources[1].stats[c]['count']
 
         return new_row_size * nrows
 
@@ -871,7 +870,7 @@ class Union(DataFrame):
                                              for source in self.sources)
 
     def _predict_memory_from_sources(self):
-        return sum([s.memory_usage.sum() for s in self.sources])
+        return sum([s.memory_usage().sum() for s in self.sources])
 
     def _pandas(self):
         return pd.concat([s.result for s in self.sources])
@@ -888,7 +887,7 @@ class Limit(DataFrame):
             self.sources[0].name, self.n)
 
     def _predict_memory_from_sources(self):
-        prev_mem = self.sources[0].memory_usage.sum()
+        prev_mem = self.sources[0].memory_usage().sum()
         shrink_ratio = self.n / self.sources[0].stats[0]['count']
         sample_mem = prev_mem * shrink_ratio
         return sample_mem
@@ -1015,7 +1014,7 @@ class Aggregator(DataFrame):
             self.final_type = None
 
     def _predict_memory_from_sources(self):
-        # if self.grouped:    #TODO: what does it mean if not grouped?
+        # if self.grouped:    # TODO: what does it mean if not grouped?
         raise NotImplementedError
 
     def _pandas(self):
@@ -1222,7 +1221,7 @@ class Arithmetic(DataFrame, ArithmeticMixin):
             self._operation_as_str(), self.sources[0].name)
 
     def _predict_memory_from_sources(self):
-        return self.sources[0].memory_usage
+        return self.sources[0].memory_usage()
 
     def _pandas(self):
         # Operands might not be already computed since they are not technically

@@ -609,9 +609,9 @@ class TestDataFrame(unittest.TestCase):
         df = ps.DataFrame(base_df)
 
         df.compute()
-
-        self.assertEqual(df.memory_usage,
-                         base_df.memory_usage(deep=True, index=True).sum())
+        pd.testing.assert_series_equal(df.memory_usage(),
+                                       base_df.memory_usage(deep=True,
+                                                            index=True))
 
     def test_attr_access(self):
         base_df = pd.DataFrame([{'n': i, 's': (i*2)} for i in range(10)])
