@@ -279,7 +279,7 @@ class Criterion(BaseFrame):
         projs = [s for s in self.sources if isinstance(s, Projection)]
         assert len(projs) > 0
         nrows = projs[0].sources[0].stats.iloc[:, 0]['count']
-        index_usage = projs[0].sources[0].memory_usage['Index']
+        index_usage = projs[0].sources[0].memory_usage()['Index']
         return index_usage + nrows    # assuming 1 byte/bool?
 
     def _pandas(self):
@@ -711,8 +711,8 @@ class Projection(DataFrame, ArithmeticMixin):
         return self.sources[0].result[self.columns]
 
     def _predict_memory_from_sources(self):
-        index_usage = self.sources[0].memory_usage['Index']
-        return index_usage + self.sources[0].memory_usage[self.columns].sum()
+        index_usage = self.sources[0].memory_usage()['Index']
+        return index_usage + self.sources[0].memory_usage()[self.columns].sum()
 
     def __hash__(self):
         return super().__hash__()
@@ -812,7 +812,7 @@ class Join(DataFrame):
 
     def _predict_memory_from_sources(self):
         def merge_size(l_frame, r_frame, join_key, how='inner'):
-            # TODO: have to ensure that l_frame and r_frame are already computed
+            # TODO: have to ensure that l_frame & r_frame are already computed
             l_groups = l_frame.groupby(join_key).size()
             r_groups = r_frame.groupby(join_key).size()
             l_keys = set(l_groups.index)
@@ -849,10 +849,10 @@ class Join(DataFrame):
         new_row_size = 0
         for c in self.columns:
             if c in self.sources[0].columns:
-                new_row_size += self.sources[0].memory_usage[c] / \
+                new_row_size += self.sources[0].memory_usage()[c] / \
                     self.sources[0].stats[c]['count']
             else:
-                new_row_size += self.sources[1].memory_usage[c] / \
+                new_row_size += self.sources[1].memory_usage()[c] / \
                     self.sources[1].stats[c]['count']
 
         return new_row_size * nrows
@@ -936,7 +936,7 @@ class GroupByDataFrame(BaseFrame):
                                            self.groupby_cols)
 
     def _predict_memory_from_sources(self):
-        return 1000 # TODO: just a guess
+        return 1000     # TODO: just a guess
 
     def _pandas(self):
         grouped = self.sources[0].result.groupby(self.groupby_cols,
@@ -972,7 +972,7 @@ class GroupByProjection(GroupByDataFrame):
                     self.columns.to_list())
 
     def _predict_memory_from_sources(self):
-        return 1000 # TODO: just a guess
+        return 1000     # TODO: just a guess
 
 ##############################################################################
 #                                Aggregators

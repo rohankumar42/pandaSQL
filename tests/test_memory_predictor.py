@@ -5,7 +5,7 @@ import pandas as pd
 import pandasql as ps
 
 
-class TestCostModel(unittest.TestCase):
+class TestMemoryPredictor(unittest.TestCase):
 
     def setUp(self):
         self.THRESHOLD = 0.2
