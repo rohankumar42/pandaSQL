@@ -5,7 +5,7 @@ import pandas as pd
 import pandasql as ps
 
 
-class TestCostModel(unittest.TestCase):
+class TestMemoryPredictor(unittest.TestCase):
 
     def setUp(self):
         self.THRESHOLD = 0.2
@@ -38,6 +38,7 @@ class TestCostModel(unittest.TestCase):
         pd_mem = base_sel.memory_usage(deep=True, index=True)
         ps_mem = sel._predict_memory_from_sources()
         self.assertAlmostEqual(pd_mem, ps_mem, delta=self.THRESHOLD * pd_mem)
+
 
 if __name__ == "__main__":
     unittest.main()

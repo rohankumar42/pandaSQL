@@ -44,7 +44,7 @@ class BaseFrame(object):
         self.columns = pd.Index([])
         self._sql_query = None
         self._memory_usage = None
-        self.stats = None
+        self._stats = None
         self._unique = None
 
         # For each source, add this as a dependent
@@ -99,7 +99,7 @@ class BaseFrame(object):
 
             # Compute stats about result, if it exists on Pandas
             if isinstance(self._cached_result, pd.DataFrame):
-                self.stats = collect_stats(self._cached_result)
+                self._stats = collect_stats(self._cached_result)
                 self._unique = collect_unique(self._cached_result)
 
         return self.result
@@ -278,8 +278,8 @@ class Criterion(BaseFrame):
     def _predict_memory_from_sources(self):
         projs = [s for s in self.sources if isinstance(s, Projection)]
         assert len(projs) > 0
-        nrows = projs[0].sources[0].stats.iloc[:, 0]['count']
-        index_usage = projs[0].sources[0].memory_usage['Index']
+        nrows = projs[0].sources[0]._stats.iloc[:, 0]['count']
+        index_usage = projs[0].sources[0].memory_usage()['Index']
         return index_usage + nrows    # assuming 1 byte/bool?
 
     def _pandas(self):
@@ -468,7 +468,7 @@ class DataFrame(BaseFrame):
 
         # Compute stats about data, if it exists on Pandas
         if isinstance(self._cached_result, pd.DataFrame):
-            self.stats = collect_stats(self._cached_result)
+            self._stats = collect_stats(self._cached_result)
             self._unique = collect_unique(self._cached_result)
 
     def __getitem__(self, x):
@@ -562,7 +562,11 @@ class DataFrame(BaseFrame):
         return Projection(self, self.columns.tolist(), drop_duplicates=True)
 
     def _predict_memory_from_sources(self):
-        return self.memory_usage().sum()
+        if self._cached_result is None:
+            raise RuntimeError('Cannot predict memory usage of a generic '
+                               'DataFrame which does not have a result.')
+        else:
+            return self.memory_usage().sum()
 
     @require_result
     def __str__(self):
@@ -641,7 +645,7 @@ class Update(object):
 
     def _predict_memory_from_sources(self):
         old_mem = self.source.memory_usage().sum()
-        new_mem = self.source.stats[0]['count'] * 8  # TODO: figure out type
+        new_mem = self.source._stats[0]['count'] * 8  # TODO: figure out type
         return old_mem + new_mem
 
     def __str__(self):
@@ -711,8 +715,8 @@ class Projection(DataFrame, ArithmeticMixin):
         return self.sources[0].result[self.columns]
 
     def _predict_memory_from_sources(self):
-        index_usage = self.sources[0].memory_usage['Index']
-        return index_usage + self.sources[0].memory_usage[self.columns].sum()
+        index_usage = self.sources[0].memory_usage()['Index']
+        return index_usage + self.sources[0].memory_usage()[self.columns].sum()
 
     def __hash__(self):
         return super().__hash__()
@@ -729,7 +733,7 @@ class Selection(DataFrame):
 
     def _predict_memory_from_sources(self):
         new_rows = self.pandas_sources[0].result.sum()
-        prev_rows = self.sources[0].stats.iloc[:, 0]['count']
+        prev_rows = self.sources[0]._stats.iloc[:, 0]['count']
         kept_ratio = new_rows / prev_rows
         return kept_ratio * self.sources[0].memory_usage().sum()
 
@@ -812,7 +816,7 @@ class Join(DataFrame):
 
     def _predict_memory_from_sources(self):
         def merge_size(l_frame, r_frame, join_key, how='inner'):
-            # TODO: have to ensure that l_frame and r_frame are already computed
+            # TODO: must ensure that l_frame and r_frame are already computed
             l_groups = l_frame.groupby(join_key).size()
             r_groups = r_frame.groupby(join_key).size()
             l_keys = set(l_groups.index)
@@ -849,11 +853,11 @@ class Join(DataFrame):
         new_row_size = 0
         for c in self.columns:
             if c in self.sources[0].columns:
-                new_row_size += self.sources[0].memory_usage[c] / \
-                    self.sources[0].stats[c]['count']
+                new_row_size += self.sources[0].memory_usage()[c] / \
+                    self.sources[0]._stats[c]['count']
             else:
-                new_row_size += self.sources[1].memory_usage[c] / \
-                    self.sources[1].stats[c]['count']
+                new_row_size += self.sources[1].memory_usage()[c] / \
+                    self.sources[1]._stats[c]['count']
 
         return new_row_size * nrows
 
@@ -876,7 +880,7 @@ class Union(DataFrame):
                                              for source in self.sources)
 
     def _predict_memory_from_sources(self):
-        return sum([s.memory_usage().sum() for s in self.sources])
+        return sum(s.memory_usage().sum() for s in self.sources)
 
     def _pandas(self):
         return pd.concat([s.result for s in self.sources])
@@ -894,7 +898,7 @@ class Limit(DataFrame):
 
     def _predict_memory_from_sources(self):
         prev_mem = self.sources[0].memory_usage().sum()
-        shrink_ratio = self.n / self.sources[0].stats[0]['count']
+        shrink_ratio = self.n / self.sources[0]._stats[0]['count']
         sample_mem = prev_mem * shrink_ratio
         return sample_mem
 
@@ -936,7 +940,7 @@ class GroupByDataFrame(BaseFrame):
                                            self.groupby_cols)
 
     def _predict_memory_from_sources(self):
-        return 1000 # TODO: just a guess
+        return 1000  # TODO: just a guess
 
     def _pandas(self):
         grouped = self.sources[0].result.groupby(self.groupby_cols,
@@ -972,7 +976,7 @@ class GroupByProjection(GroupByDataFrame):
                     self.columns.to_list())
 
     def _predict_memory_from_sources(self):
-        return 1000 # TODO: just a guess
+        return 1000  # TODO: just a guess
 
 ##############################################################################
 #                                Aggregators
@@ -1026,11 +1030,21 @@ class Aggregator(DataFrame):
 
     def _predict_memory_from_sources(self):
         if self.grouped:
-            num_groups = min(self.sources[0]._unique[self.groupby_cols])
+            # When grouping by columns (C1, ..., Cn), if the columns are
+            # independent, the number of unique groups will be the product
+            # of the number of unique values in each column.
+            # TODO: In case of non-independent columns, this will be an
+            # overestimate. Should we improve? Maybe not worth it since
+            # group by outputs are usually small.
+            num_groups = self.sources[0]._unique[self.groupby_cols].prod()
         else:
             num_groups = 1
-        prev_rows = self.sources[0].stats.iloc[:, 0]['count']
-        return num_groups / prev_rows * self.sources[0].memory_usage.sum()
+        prev_rows = self.sources[0]._stats.iloc[:, 0]['count']
+
+        # TODO: This assumes that the size of the aggregated result will be the
+        # same as that of a single value of the column. This assumption holds
+        # for fixed-size types like ints and floats, but not for strings.
+        return num_groups / prev_rows * self.sources[0].memory_usage().sum()
 
     def _pandas(self):
         if self.grouped:
@@ -1483,9 +1497,11 @@ def collect_stats(df: pd.DataFrame):
     # TODO: also collect stats for str and datetime columns
     return df.describe([q / 100 for q in range(5, 100, 5)])
 
+
 def collect_unique(df: pd.DataFrame):
     # TODO: also collect stats for str and datetime columns
     return df.nunique()
+
 
 ##############################################################################
 #                           Public SQLite Functions
