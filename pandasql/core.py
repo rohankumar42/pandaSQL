@@ -44,7 +44,7 @@ class BaseFrame(object):
         self.columns = pd.Index([])
         self._sql_query = None
         self._memory_usage = None
-        self._stats = None
+        self._count = None
         self._unique = None
 
         # For each source, add this as a dependent
@@ -80,6 +80,13 @@ class BaseFrame(object):
                 self._memory_usage = None
         return self._memory_usage
 
+    def _offload(self):
+        assert(self._cached_result is not None)
+        if not self._cached_on_sqlite:
+            self._cached_result.to_sql(name=self.name, con=SQL_CON,
+                                       index=False)
+            self._cached_on_sqlite = True
+
     def compute(self):
         # TODO: explore if there are situations when some part of the
         # computation should be offloaded, whereas others should not.
@@ -97,11 +104,6 @@ class BaseFrame(object):
                 _ensure_computable(self, on='pandas')
                 self._compute_pandas()
 
-            # Compute stats about result, if it exists on Pandas
-            if isinstance(self._cached_result, pd.DataFrame):
-                self._stats = collect_stats(self._cached_result)
-                self._unique = collect_unique(self._cached_result)
-
         return self.result
 
     def _compute_pandas(self, offload=False):
@@ -109,26 +111,56 @@ class BaseFrame(object):
             graph = _get_dependency_graph(self, on='pandas')
             ordered_deps = _topological_sort(graph)
 
-            # Compute all dependencies in order (via Pandas)
+            # Compute all dependencies in order. Before computing each
+            # dependency, predict if its computation will fit in memory.
+            # If so, compute on Pandas (as requested). Otherwise,
+            # offload the computation to SQLite.
             for t in ordered_deps:
-                if t is not self and t.result is None \
-                        and isinstance(t, BaseFrame):
-                    t.compute()
+                if t.result is None and isinstance(t, BaseFrame):
+                    if t.update is None:
+                        predicted = t._predict_memory_from_sources()
+                    else:
+                        predicted = t.update._predict_memory_from_sources()
+                    too_big = predicted >= _free_memory()
 
-            # Finally, compute this object's result
-            if self.update is None:
-                result = self._pandas()
-            else:   # Trigger the lazy write that is pending for this object
-                result = self.update.source.result.copy(deep=True)
-                result[self.update.col] = self.update.value.result
+                    # Run on Pandas if the operation is supported only via
+                    # Pandas, or if it is not expected to run out of memory
+                    # TODO: Fallback operations might run out of memory but
+                    # we can't run them on SQLite! Log a warning for them?
+                    if isinstance(t, FallbackOperation) or not too_big:
+                        if t.update is None:
+                            result = t._pandas()
+                        else:   # Trigger the pending lazy write for this df
+                            result = t.update.source.result.copy(deep=True)
+                            result[t.update.col] = t.update.value.result
 
-            # TODO(important): when should this result be offloaded to SQLite?
-            self._cached_result = result
-            self._computed_on_pandas = True
+                        t._cached_result = result
+                        t._computed_on_pandas = True
 
-            if offload:
-                self._cached_on_sqlite = True
-                result.to_sql(name=self.name, con=SQL_CON, index=False)
+                        # TODO(important): when should this result be
+                        # offloaded to SQLite?
+                        if offload:
+                            t._offload()
+
+                        # Compute stats about result
+                        if isinstance(t._cached_result, pd.DataFrame):
+                            t._count = collect_count(t._cached_result)
+                            t._unique = collect_unique(t._cached_result)
+
+                    # Operation is too big for Pandas, so run on SQLite
+                    else:
+                        raise NotImplementedError('TODO: test this')
+                        # TODO: Make a decision for whether to transfer
+                        # dependencies or recompute them on SQLite
+                        try:
+                            _ensure_computable(t, on='sqlite')
+                        except RuntimeError:
+                            # All dependencies do not exist on SQLite,
+                            # so transfer all sources
+                            for source in t.sources:
+                                source._offload()
+                        _ensure_computable(t, on='sqlite')
+                        t._compute_sqlite()
 
         return self.result
 
@@ -153,6 +185,11 @@ class BaseFrame(object):
                 self._cached_result = pd.read_sql_query(
                     read_query, con=SQL_CON)
                 self.columns = self._cached_result.columns
+
+                # Compute stats about result
+                if isinstance(self._cached_result, pd.DataFrame):
+                    self._count = collect_count(self._cached_result)
+                    self._unique = collect_unique(self._cached_result)
 
         return self.result
 
@@ -267,6 +304,16 @@ class Criterion(BaseFrame):
         if source_2 is not None:
             sources.append(source_2)
 
+        data_sources = set()
+        for source in sources:
+            if isinstance(source, ArithmeticMixin):
+                data_sources.update(source.sources)
+            elif isinstance(source, Criterion):
+                data_sources.add(source._data_source)
+        if len(data_sources) != 1:
+            raise ValueError('Need exactly one source of data for Criterion')
+        self._data_source = data_sources.pop()
+
         super().__init__(name=name, sources=sources)
 
     def __str__(self):
@@ -276,11 +323,8 @@ class Criterion(BaseFrame):
                                  self._source_to_str(self.sources[1]))
 
     def _predict_memory_from_sources(self):
-        projs = [s for s in self.sources if isinstance(s, Projection)]
-        assert len(projs) > 0
-        nrows = projs[0].sources[0]._stats.iloc[:, 0]['count']
-        nrows = projs[0].sources[0].stats.iloc[:, 0]['count']
-        index_usage = projs[0].sources[0].memory_usage()['Index']
+        nrows = self._data_source._count
+        index_usage = self._data_source.memory_usage()['Index']
         return index_usage + nrows    # assuming 1 byte/bool?
 
     def _pandas(self):
@@ -455,21 +499,18 @@ class DataFrame(BaseFrame):
             raise TypeError('Cannot create table from object of type {}'
                             .format(type(data)))
 
-        if df is not None and len(df) > 0:
+        if self._cached_result is not None and len(self._cached_result) > 0:
             if offload:  # Offload dataframe to SQLite
-                df.to_sql(name=self.name, con=SQL_CON,
-                          index=False, chunksize=SQLITE_CHUNK_SIZE)
-                self._cached_on_sqlite = True
-
+                self._offload()
             # Store columns
-            self.columns = df.columns
+            self.columns = self._cached_result.columns
 
         elif loaded_on_sqlite:
             self._cached_on_sqlite = True
 
         # Compute stats about data, if it exists on Pandas
         if isinstance(self._cached_result, pd.DataFrame):
-            self._stats = collect_stats(self._cached_result)
+            self._count = collect_count(self._cached_result)
             self._unique = collect_unique(self._cached_result)
 
     def __getitem__(self, x):
@@ -491,7 +532,10 @@ class DataFrame(BaseFrame):
         old.__dict__.update(self.__dict__)
 
         # Make a copy of the _pandas method so old._pandas() works correctly
+        # Similarly, for the _predict_memory_from_sources method
         old._pandas = lambda: self.__class__._pandas(old)
+        old._predict_memory_from_sources = lambda: \
+            self.__class__._predict_memory_from_sources(old)
 
         # For all dependents, replace self as a source, and add old instead
         for dependent in old.dependents:
@@ -563,9 +607,11 @@ class DataFrame(BaseFrame):
         return Projection(self, self.columns.tolist(), drop_duplicates=True)
 
     def _predict_memory_from_sources(self):
+        assert(self.update is None)
         if self._cached_result is None:
             raise RuntimeError('Cannot predict memory usage of a generic '
                                'DataFrame which does not have a result.')
+
         else:
             return self.memory_usage().sum()
 
@@ -646,7 +692,8 @@ class Update(object):
 
     def _predict_memory_from_sources(self):
         old_mem = self.source.memory_usage().sum()
-        new_mem = self.source._stats[0]['count'] * 8  # TODO: figure out type
+        # TODO: figure out type and use size of type
+        new_mem = self.source._count * 8
         return old_mem + new_mem
 
     def __str__(self):
@@ -733,8 +780,9 @@ class Selection(DataFrame):
             self.sources[0].name, self.pandas_sources[0])
 
     def _predict_memory_from_sources(self):
+        print(self.name, type(self.pandas_sources[0].result))
         new_rows = self.pandas_sources[0].result.sum()
-        prev_rows = self.sources[0]._stats.iloc[:, 0]['count']
+        prev_rows = self.sources[0]._count
         kept_ratio = new_rows / prev_rows
         return kept_ratio * self.sources[0].memory_usage().sum()
 
@@ -816,18 +864,20 @@ class Join(DataFrame):
                     ' AND '.join(join_cols))
 
     def _predict_memory_from_sources(self):
-        def merge_size(l_frame, r_frame, join_key, how='inner'):
+        def merge_size(l_frame, r_frame, l_key, r_key, how='inner'):
+            l_frame = l_frame._cached_result
+            r_frame = r_frame._cached_result
             # TODO: must ensure that l_frame and r_frame are already computed
-            l_groups = l_frame.groupby(join_key).size()
-            r_groups = r_frame.groupby(join_key).size()
+            l_groups = l_frame.groupby(l_key).size()
+            r_groups = r_frame.groupby(r_key).size()
             l_keys = set(l_groups.index)
             r_keys = set(r_groups.index)
             intersection = r_keys & l_keys
             l_diff = l_keys - intersection
             r_diff = r_keys - intersection
 
-            l_nan = len(l_frame[l_frame[join_key] != l_frame[join_key]])
-            r_nan = len(r_frame[r_frame[join_key] != r_frame[join_key]])
+            l_nan = len(l_frame[l_frame[l_key] != l_frame[l_key]])
+            r_nan = len(r_frame[r_frame[r_key] != r_frame[r_key]])
             l_nan = 1 if l_nan == 0 and r_nan != 0 else l_nan
             r_nan = 1 if r_nan == 0 and l_nan != 0 else r_nan
 
@@ -848,17 +898,17 @@ class Join(DataFrame):
         # TODO: handle multi keys better, likely needs to be optimized
         # https://github.com/pandas-dev/pandas/issues/15068
 
-        nrows = min([merge_size(self.sources[0], self.sources[1], rk)
-                     for rk in self.right_keys])
+        nrows = min([merge_size(self.sources[0], self.sources[1], lk, rk)
+                     for lk, rk in zip(self.left_keys, self.right_keys)])
 
         new_row_size = 0
         for c in self.columns:
             if c in self.sources[0].columns:
                 new_row_size += self.sources[0].memory_usage()[c] / \
-                    self.sources[0]._stats[c]['count']
+                    self.sources[0]._count
             else:
                 new_row_size += self.sources[1].memory_usage()[c] / \
-                    self.sources[1]._stats[c]['count']
+                    self.sources[1]._count
 
         return new_row_size * nrows
 
@@ -899,7 +949,7 @@ class Limit(DataFrame):
 
     def _predict_memory_from_sources(self):
         prev_mem = self.sources[0].memory_usage().sum()
-        shrink_ratio = self.n / self.sources[0]._stats[0]['count']
+        shrink_ratio = self.n / self.sources[0]._count
         sample_mem = prev_mem * shrink_ratio
         return sample_mem
 
@@ -1038,15 +1088,18 @@ class Aggregator(DataFrame):
             # TODO: In case of non-independent columns, this will be an
             # overestimate. Should we improve? Maybe not worth it since
             # group by outputs are usually small.
-            num_groups = self.sources[0]._unique[self.groupby_cols].prod()
+            groupby_cols = self.sources[0].groupby_cols
+            data_source = self.sources[0].sources[0]
+            num_groups = data_source._unique[groupby_cols].prod()
         else:
+            data_source = self.sources[0]
             num_groups = 1
-        prev_rows = self.sources[0]._stats.iloc[:, 0]['count']
 
         # TODO: This assumes that the size of the aggregated result will be the
         # same as that of a single value of the column. This assumption holds
         # for fixed-size types like ints and floats, but not for strings.
-        return num_groups / prev_rows * self.sources[0].memory_usage().sum()
+        prev_rows = data_source._count
+        return num_groups / prev_rows * data_source.memory_usage().sum()
 
     def _pandas(self):
         if self.grouped:
@@ -1098,7 +1151,11 @@ class FallbackOperation(DataFrame):
         self.columns = source.columns
 
     def _predict_memory_from_sources(self):
-        raise NotImplementedError
+        # TODO: We do not have memory predictions for fallback operations.
+        # Since we cannot run fallback operations on SQLite anyway,
+        # we will never use this to decide that this computation will run out
+        # of memory on Pandas.
+        return 0
 
     def _pandas(self):
         source_result = self.sources[0].result
@@ -1252,11 +1309,12 @@ class Arithmetic(DataFrame, ArithmeticMixin):
             self._operation_as_str(), self.sources[0].name)
 
     def _predict_memory_from_sources(self):
-        return self.sources[0].memory_usage()
+        return self.sources[0].memory_usage().sum()
 
     def _pandas(self):
         # Operands might not be already computed since they are not technically
         # "sources" (dependencies). So, explicitly compute them.
+        # TODO: make operands pandas-only sources!
         for operand in self.operands:
             operand.compute()
 
@@ -1495,13 +1553,13 @@ def _make_projection_or_constant(x, simple=False, arithmetic=True):
         raise TypeError('Only constants and Projections are accepted')
 
 
-def collect_stats(df: pd.DataFrame):
-    # TODO: also collect stats for str and datetime columns
-    return df.describe([q / 100 for q in range(5, 100, 5)])
+def collect_count(df: pd.DataFrame):
+    return len(df)
 
 
 def collect_unique(df: pd.DataFrame):
-    # TODO: also collect stats for str and datetime columns
+    # TODO: Don't do this for every DataFrame. Just compute in GroupBy etc
+    # when it is needed
     return df.nunique()
 
 

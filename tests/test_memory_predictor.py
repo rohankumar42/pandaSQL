@@ -6,6 +6,7 @@ import pandasql as ps
 
 
 class TestMemoryPredictor(unittest.TestCase):
+    # TODO(important): Add tests for all objects' memory predictors!
 
     def setUp(self):
         self.THRESHOLD = 0.2
