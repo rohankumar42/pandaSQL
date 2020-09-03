@@ -279,6 +279,7 @@ class Criterion(BaseFrame):
         projs = [s for s in self.sources if isinstance(s, Projection)]
         assert len(projs) > 0
         nrows = projs[0].sources[0]._stats.iloc[:, 0]['count']
+        nrows = projs[0].sources[0].stats.iloc[:, 0]['count']
         index_usage = projs[0].sources[0].memory_usage()['Index']
         return index_usage + nrows    # assuming 1 byte/bool?
 
@@ -977,6 +978,7 @@ class GroupByProjection(GroupByDataFrame):
 
     def _predict_memory_from_sources(self):
         return 1000  # TODO: just a guess
+
 
 ##############################################################################
 #                                Aggregators
