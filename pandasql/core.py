@@ -76,7 +76,8 @@ class BaseFrame(object):
                 self._memory_usage = pd.DataFrame(usage)
             else:
                 # TODO: handle Aggregator, GroupByDataFrame, GroupByProjection
-                self._memory_usage = None
+                raise RuntimeError('Cannot provide memory usage for a '
+                                   'dataframe without a result.')
         return self._memory_usage
 
     def _offload(self):
@@ -96,11 +97,16 @@ class BaseFrame(object):
             # part of B's SQL query, or should A's result be first transferred
             # to SQLite? Probably not one-size-fits-all. Currently, the former
             # occurs every time.
-            if should_offload_computation(self):
-                _ensure_computable(self, on='sqlite')
+            on = choose_compute_mechanism(self)
+            if not _is_computable(self, on=on):
+                raise RuntimeError('Offload engine chose to compute '
+                                   f'{self.name} on {on}, but this cannot '
+                                   'be done, either because of missing '
+                                   'dependencies, or Pandas-only operations.')
+
+            if on == 'sqlite':
                 self._compute_sqlite()
             else:
-                _ensure_computable(self, on='pandas')
                 self._compute_pandas()
 
         return self.result
@@ -114,7 +120,7 @@ class BaseFrame(object):
             # dependency, predict if its computation will fit in memory.
             # If so, compute on Pandas (as requested). Otherwise,
             # offload the computation to SQLite.
-            for t in ordered_deps:
+            for i, t in enumerate(ordered_deps):
                 if t.result is None and isinstance(t, BaseFrame):
                     if t.update is None:
                         predicted = t._predict_memory_from_sources()
@@ -145,20 +151,23 @@ class BaseFrame(object):
                         if isinstance(t._cached_result, pd.DataFrame):
                             t._count = collect_count(t._cached_result)
 
-                    # Operation is too big for Pandas, so run on SQLite
+                    # The next operation is too big for Pandas, so run the
+                    # remainder of the computation on SQLite
                     else:
-                        raise NotImplementedError('TODO: test this')
                         # TODO: Make a decision for whether to transfer
                         # dependencies or recompute them on SQLite
-                        try:
-                            _ensure_computable(t, on='sqlite')
-                        except RuntimeError:
+                        if not _is_computable(t, on='sqlite'):
                             # All dependencies do not exist on SQLite,
                             # so transfer all sources
-                            for source in t.sources:
-                                source._offload()
-                        _ensure_computable(t, on='sqlite')
-                        t._compute_sqlite()
+                            for j in range(i):
+                                ordered_deps[j]._offload()
+
+                        # Run the remainder of the computation on SQLite
+                        assert(_is_computable(self, on='sqlite'))
+                        self._compute_sqlite()
+
+                        # Break out of loop; no more dependencies to compute
+                        break
 
         return self.result
 
@@ -1439,19 +1448,19 @@ def offloading_strategy(name=None):
         return OFFLOADING_STRATEGY
 
 
-def should_offload_computation(df: BaseFrame):
+def choose_compute_mechanism(df: BaseFrame):
     if OFFLOADING_STRATEGY == 'ALWAYS':
-        return True
+        return 'sqlite'
     elif OFFLOADING_STRATEGY == 'NEVER':
-        return False
+        return 'pandas'
     elif OFFLOADING_STRATEGY == 'BEST':
-        return COST_MODEL.should_offload(df)
+        return 'sqlite' if COST_MODEL.should_offload(df) else 'pandas'
     else:
         raise NotImplementedError('Unsupported offloading strategy: {}'
                                   .format(OFFLOADING_STRATEGY))
 
 
-def _ensure_computable(df, on):
+def _is_computable(df, on):
     if on == 'pandas':
         def is_cached(x): return x._cached_result is not None
     elif on == 'sqlite':
@@ -1477,8 +1486,9 @@ def _ensure_computable(df, on):
             faults += 1
 
     if faults > 0:
-        raise RuntimeError(f'The given computation cannot be run on {on} '
-                           f'because {faults} dependencies cannot be computed')
+        # The given computation cannot be run on this mechanism
+        # because some dependencies cannot be computed
+        return False
 
     # If there are any pending operations that are Pandas-only
     # (i.e., supported via fallbacks), then we cannot run on SQLite.
@@ -1487,9 +1497,11 @@ def _ensure_computable(df, on):
                                       isinstance(x, FallbackOperation),
                                       max_depth=None)
         if len(fallbacks) > 0:
-            raise RuntimeError(f'The given computation cannot be run on {on} '
-                               f'because {len(fallbacks)} pending operations '
-                               'are only supported via Pandas.')
+            # The given computation cannot be run on this mechanism
+            # because some pending operations are only supported via Pandas
+            return False
+
+    return True
 
 
 ##############################################################################
