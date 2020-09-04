@@ -33,11 +33,6 @@ class CostModel(object):
 FARTHEST_DEPENDENCE = 1   # TODO: How much should we allow? Maybe 2-3?
 
 
-def _out_of_memory(df, graph):
-    # TODO: How should we estimate memory usage of a query?
-    return NotImplemented
-
-
 def _join_then_restrict(df, graph):
     for node in graph.keys():
         # If result is already cached, no point in looking at it
@@ -83,7 +78,6 @@ def _fallback_operation(df, graph):
 
 OFFLOADING_RULES = [
     _fallback_operation,
-    # _out_of_memory,
     _join_then_restrict,
     _limit_output,
     _deep_dependency_graph,

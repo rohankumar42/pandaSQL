@@ -95,8 +95,7 @@ class BaseFrame(object):
             # TODO: If A is computed on Pandas, and B depends on A and
             # is about to be computed on SQLite, should A be computed as
             # part of B's SQL query, or should A's result be first transferred
-            # to SQLite? Probably not one-size-fits-all. Currently, the former
-            # occurs every time.
+            # to SQLite? Probably not one-size-fits-all.
             on = choose_compute_mechanism(self)
             if not _is_computable(self, on=on):
                 raise RuntimeError('Offload engine chose to compute '
@@ -149,7 +148,7 @@ class BaseFrame(object):
 
                         # Compute stats about result
                         if isinstance(t._cached_result, pd.DataFrame):
-                            t._count = collect_count(t._cached_result)
+                            t._count = len(t._cached_result)
 
                     # The next operation is too big for Pandas, so run the
                     # remainder of the computation on SQLite
@@ -195,7 +194,7 @@ class BaseFrame(object):
 
                 # Compute stats about result
                 if isinstance(self._cached_result, pd.DataFrame):
-                    self._count = collect_count(self._cached_result)
+                    self._count = len(self._cached_result)
 
         return self.result
 
@@ -516,7 +515,7 @@ class DataFrame(BaseFrame):
 
         # Compute stats about data, if it exists on Pandas
         if isinstance(self._cached_result, pd.DataFrame):
-            self._count = collect_count(self._cached_result)
+            self._count = len(self._cached_result)
 
     def __getitem__(self, x):
         if isinstance(x, str) or isinstance(x, list):
@@ -1305,7 +1304,8 @@ class Arithmetic(DataFrame, ArithmeticMixin):
             if isinstance(self.operands[1], DataFrame):
                 sources += self.operands[1].sources
 
-        super().__init__(name=name, sources=sources)
+        super().__init__(name=name, sources=sources,
+                         pandas_sources=self.operands)
 
         assert(callable(pandas_func))
         self._pandas_func = pandas_func
@@ -1320,12 +1320,6 @@ class Arithmetic(DataFrame, ArithmeticMixin):
         return self.sources[0].memory_usage().sum()
 
     def _pandas(self):
-        # Operands might not be already computed since they are not technically
-        # "sources" (dependencies). So, explicitly compute them.
-        # TODO: make operands pandas-only sources!
-        for operand in self.operands:
-            operand.compute()
-
         results = [op.result[op.columns[0]]
                    if isinstance(op, Projection) and len(op.columns) == 1
                    else op.result for op in self.operands]
@@ -1561,10 +1555,6 @@ def _make_projection_or_constant(x, simple=False, arithmetic=True):
         return x
     else:
         raise TypeError('Only constants and Projections are accepted')
-
-
-def collect_count(df: pd.DataFrame):
-    return len(df)
 
 
 ##############################################################################
