@@ -45,7 +45,6 @@ class BaseFrame(object):
         self._sql_query = None
         self._memory_usage = None
         self._count = None
-        self._unique = None
 
         # For each source, add this as a dependent
         for source in self.sources:
@@ -145,7 +144,6 @@ class BaseFrame(object):
                         # Compute stats about result
                         if isinstance(t._cached_result, pd.DataFrame):
                             t._count = collect_count(t._cached_result)
-                            t._unique = collect_unique(t._cached_result)
 
                     # Operation is too big for Pandas, so run on SQLite
                     else:
@@ -189,7 +187,6 @@ class BaseFrame(object):
                 # Compute stats about result
                 if isinstance(self._cached_result, pd.DataFrame):
                     self._count = collect_count(self._cached_result)
-                    self._unique = collect_unique(self._cached_result)
 
         return self.result
 
@@ -325,7 +322,7 @@ class Criterion(BaseFrame):
     def _predict_memory_from_sources(self):
         nrows = self._data_source._count
         index_usage = self._data_source.memory_usage()['Index']
-        return index_usage + nrows    # assuming 1 byte/bool?
+        return index_usage + nrows    # TODO: assuming 1 byte/bool?
 
     def _pandas(self):
         results = [s.result[s.columns[0]]
@@ -511,7 +508,6 @@ class DataFrame(BaseFrame):
         # Compute stats about data, if it exists on Pandas
         if isinstance(self._cached_result, pd.DataFrame):
             self._count = collect_count(self._cached_result)
-            self._unique = collect_unique(self._cached_result)
 
     def __getitem__(self, x):
         if isinstance(x, str) or isinstance(x, list):
@@ -865,9 +861,12 @@ class Join(DataFrame):
 
     def _predict_memory_from_sources(self):
         def merge_size(l_frame, r_frame, l_key, r_key, how='inner'):
+            assert(l_frame._cached_result is not None)
+            assert(r_frame._cached_result is not None)
+
             l_frame = l_frame._cached_result
             r_frame = r_frame._cached_result
-            # TODO: must ensure that l_frame and r_frame are already computed
+
             l_groups = l_frame.groupby(l_key).size()
             r_groups = r_frame.groupby(r_key).size()
             l_keys = set(l_groups.index)
@@ -991,7 +990,9 @@ class GroupByDataFrame(BaseFrame):
                                            self.groupby_cols)
 
     def _predict_memory_from_sources(self):
-        return 1000  # TODO: just a guess
+        # Relatively uncorrelated with number of groups
+        # Approximate value measured using memory profiler
+        return 200000
 
     def _pandas(self):
         grouped = self.sources[0].result.groupby(self.groupby_cols,
@@ -1025,9 +1026,6 @@ class GroupByProjection(GroupByDataFrame):
         return 'GroupByProjection({}, by={}, cols={})' \
             .format(self.sources[0].name, self.groupby_cols,
                     self.columns.to_list())
-
-    def _predict_memory_from_sources(self):
-        return 1000  # TODO: just a guess
 
 
 ##############################################################################
@@ -1090,7 +1088,8 @@ class Aggregator(DataFrame):
             # group by outputs are usually small.
             groupby_cols = self.sources[0].groupby_cols
             data_source = self.sources[0].sources[0]
-            num_groups = data_source._unique[groupby_cols].prod()
+            nunique = data_source._cached_result.nunique()
+            num_groups = nunique[groupby_cols].prod()
         else:
             data_source = self.sources[0]
             num_groups = 1
@@ -1447,7 +1446,6 @@ def should_offload_computation(df: BaseFrame):
         return False
     elif OFFLOADING_STRATEGY == 'BEST':
         return COST_MODEL.should_offload(df)
-        # TODO: put smart offloading logic here
     else:
         raise NotImplementedError('Unsupported offloading strategy: {}'
                                   .format(OFFLOADING_STRATEGY))
@@ -1555,12 +1553,6 @@ def _make_projection_or_constant(x, simple=False, arithmetic=True):
 
 def collect_count(df: pd.DataFrame):
     return len(df)
-
-
-def collect_unique(df: pd.DataFrame):
-    # TODO: Don't do this for every DataFrame. Just compute in GroupBy etc
-    # when it is needed
-    return df.nunique()
 
 
 ##############################################################################
