@@ -153,8 +153,8 @@ class BaseFrame(object):
                     # The next operation is too big for Pandas, so run the
                     # remainder of the computation on SQLite
                     else:
-                        # TODO: Make a decision for whether to transfer
-                        # dependencies or recompute them on SQLite
+                        # TODO: For each dependency, decide whether it should
+                        # be transferred or recomputed on SQLite
                         if not _is_computable(t, on='sqlite'):
                             # All dependencies do not exist on SQLite,
                             # so transfer all sources
@@ -167,8 +167,6 @@ class BaseFrame(object):
 
                         # Break out of loop; no more dependencies to compute
                         break
-
-        return self.result
 
     def _compute_sqlite(self):
 
@@ -195,8 +193,6 @@ class BaseFrame(object):
                 # Compute stats about result
                 if isinstance(self._cached_result, pd.DataFrame):
                     self._count = len(self._cached_result)
-
-        return self.result
 
     def _pandas(self):
         raise NotImplementedError("To be implemented by subclasses")
@@ -784,7 +780,6 @@ class Selection(DataFrame):
             self.sources[0].name, self.pandas_sources[0])
 
     def _predict_memory_from_sources(self):
-        print(self.name, type(self.pandas_sources[0].result))
         new_rows = self.pandas_sources[0].result.sum()
         prev_rows = self.sources[0]._count
         kept_ratio = new_rows / prev_rows

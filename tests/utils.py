@@ -23,3 +23,8 @@ def assertDataFrameEqualsPandas(df: ps.DataFrame,
                                        *args, **kwargs)
     else:
         raise TypeError("Unexpected type {}".format(type(expected_df)))
+
+
+def compute_all_ancestors(df: ps.DataFrame):
+    for source in df.sources + df.pandas_sources:
+        source._compute_pandas()

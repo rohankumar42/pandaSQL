@@ -89,7 +89,32 @@ class TestOffloading(unittest.TestCase):
 
         ps.memory_utils.SAFETY_FACTOR = old_factor
 
-    def test_pandas_step_out_of_memory(self):
+    def test_pandas_final_step_out_of_memory(self):
+        ps.offloading_strategy('NEVER')
+
+        size = 10 ** 4
+
+        base_df = pd.DataFrame([{'n': i, 's': str(i*2)} for i in range(size)])
+        df = ps.DataFrame(base_df)
+
+        memory_thresh = 10 ** 4
+        new_factor = memory_thresh / psutil.virtual_memory().available
+        old_factor = ps.memory_utils.SAFETY_FACTOR
+        ps.memory_utils.SAFETY_FACTOR = new_factor
+
+        # Should execute, but on SQLite since ordered is expected to run
+        # out of memory
+        ordered = df.sort_values(by='n', ascending=False)
+        ordered._compute_pandas()
+        self.assertFalse(ordered._computed_on_pandas)
+        self.assertTrue(ordered._cached_on_sqlite)
+        self.assertTrue(ordered._out_of_memory)
+        self.assertIsNone(ordered._cached_result)
+        self.assertRaises(MemoryError, lambda: ordered.compute())
+
+        ps.memory_utils.SAFETY_FACTOR = old_factor
+
+    def test_pandas_intermediate_step_out_of_memory(self):
         ps.offloading_strategy('NEVER')
 
         size = 10 ** 4
