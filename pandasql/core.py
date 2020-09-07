@@ -60,8 +60,7 @@ class BaseFrame(object):
                                   'e.g., using df.head().')
             else:
                 return None
-        elif hasattr(self, 'process_result') and not self._computed_on_pandas:
-            # If result was not computed on Pandas, post-process result
+        elif hasattr(self, 'process_result'):  # Post-process result if needed
             return self.process_result(self._cached_result)
         else:
             return self._cached_result
@@ -1113,21 +1112,25 @@ class Aggregator(DataFrame):
 
         else:
             source = self.sources[0].result
-            if len(self.columns) == 1:
-                source = source[source.columns[0]]
             result = getattr(source, self.agg)()
+
+        if not isinstance(result, (pd.Series, pd.DataFrame)):
+            result = pd.DataFrame([[result]])
 
         return result
 
     def process_result(self, result):
         '''This function will be called by BaseFrame.compute'''
         if len(result) == 1:
-            series = result.iloc[0]
-            if len(series) == 1:    # Single numerical value
-                ret = series[0]
-            else:                   # Multiple numerical values
-                series.name = None
-                ret = series
+            row = result.iloc[0]
+            if isinstance(row, pd.Series):
+                if len(row) == 1:    # Single numerical value
+                    ret = row[0]
+                else:                   # Multiple numerical values
+                    row.name = None
+                    ret = row
+            else:   # Constant
+                ret = row
         else:
             ret = result
 
