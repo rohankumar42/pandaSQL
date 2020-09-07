@@ -1101,7 +1101,9 @@ class Aggregator(DataFrame):
         # same as that of a single value of the column. This assumption holds
         # for fixed-size types like ints and floats, but not for strings.
         prev_rows = data_source._count
-        return num_groups / prev_rows * data_source.memory_usage().sum()
+        index_usage = data_source.memory_usage()['Index']
+        row_usage = data_source.memory_usage()[self.columns].sum()
+        return index_usage + (num_groups / prev_rows * row_usage)
 
     def _pandas(self):
         if self.grouped:

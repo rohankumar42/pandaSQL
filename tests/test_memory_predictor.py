@@ -7,67 +7,60 @@ from .utils import compute_all_ancestors
 class TestMemoryPredictor(unittest.TestCase):
     # TODO(important): Add tests for all objects' memory predictors!
 
-    def checkMemoryPrediction(self, df: ps.DataFrame, base_df: pd.DataFrame,
-                              delta=0.1):
-        pd_mem = base_df.memory_usage(deep=True, index=True)
-        if isinstance(pd_mem, pd.Series):
-            pd_mem = pd_mem.sum()
+    def setUp(self):
+        ps.offloading_strategy('NEVER')
 
+    def checkMemoryPrediction(self, df: ps.DataFrame, delta=0.1):
         compute_all_ancestors(df)
-        ps_mem = df._predict_memory_from_sources()
+        predicted = df._predict_memory_from_sources()
 
-        self.assertAlmostEqual(pd_mem, ps_mem, delta=delta * pd_mem)
+        df._compute_pandas()
+        actual = df._cached_result.memory_usage(deep=True, index=True)
+        if isinstance(actual, pd.Series):
+            actual = actual.sum()
 
-    def test_simple_memory_prediction(self):
-        base_df = pd.DataFrame([{'n': i, 's': str(i*2)} for i in range(10)])
-        df = ps.DataFrame(base_df)
-        self.checkMemoryPrediction(df, base_df, delta=0.0)
+        self.assertAlmostEqual(actual, predicted, delta=delta * actual)
 
     def test_projection_memory_prediction(self):
-        base_df = pd.DataFrame([{'n': i, 's': str(i*2)} for i in range(10)])
-        df = ps.DataFrame(base_df)
-
-        base_proj = base_df.n
+        df = ps.DataFrame([{'n': i, 's': str(i*2)} for i in range(100)])
         proj = df.n
-        self.checkMemoryPrediction(proj, base_proj, delta=0.0)
+        self.checkMemoryPrediction(proj, delta=0.0)
 
     def test_criterion_memory_prediction(self):
-        base_df = pd.DataFrame([{'n': i, 's': str(i*2)} for i in range(10)])
-        df = ps.DataFrame(base_df)
-
-        base_criterion = base_df.n > 4
+        df = ps.DataFrame([{'n': i, 's': str(i*2)} for i in range(100)])
         criterion = df.n > 4
-        self.checkMemoryPrediction(criterion, base_criterion, delta=0.0)
+        self.checkMemoryPrediction(criterion, delta=0.0)
 
     def test_selection_memory_prediction(self):
-        base_df = pd.DataFrame([{'n': i, 's': str(i*2)} for i in range(10)])
-        df = ps.DataFrame(base_df)
-
-        base_sel = base_df[base_df.n > 4]
+        df = ps.DataFrame([{'n': i, 's': str(i*2)} for i in range(100)])
         sel = df[df.n > 4]
-        self.checkMemoryPrediction(sel, base_sel)
+        self.checkMemoryPrediction(sel)
 
     def test_limit_memory_prediction(self):
-        base_df = pd.DataFrame([{'n': i, 's': str(i*2)} for i in range(100)])
-        df = ps.DataFrame(base_df)
-
-        base_limit = base_df[:25]
+        df = ps.DataFrame([{'n': i, 's': str(i*2)} for i in range(100)])
         limit = df[:25]
-        self.checkMemoryPrediction(limit, base_limit)
+        self.checkMemoryPrediction(limit)
 
     def test_order_by_memory_prediction(self):
-        base_df = pd.DataFrame([{'n': i, 's': str(i*2)} for i in range(10)])
-        df = ps.DataFrame(base_df)
-
-        base_ordered = base_df.sort_values(by='n', ascending=False)
+        df = ps.DataFrame([{'n': i, 's': str(i*2)} for i in range(100)])
         ordered = df.sort_values(by='n', ascending=False)
-        self.checkMemoryPrediction(ordered, base_ordered)
+        self.checkMemoryPrediction(ordered)
 
-    def test_join_memory_prediction(self):
-        return NotImplemented
+    def test_merge_memory_prediction(self):
+        df_1 = ps.DataFrame([{'n': i, 's1': str(i*2)}
+                             for i in range(10, 10000, 5)])
+        df_2 = ps.DataFrame([{'n': i, 's2': str(i*2)}
+                             for i in range(20000, 4000, -15)])
+        merged = df_1.merge(df_2, on='n')
+        self.checkMemoryPrediction(merged)
 
     def test_union_memory_prediction(self):
-        return NotImplemented
+        df_1 = ps.DataFrame([{'n': i, 's': str(i)}
+                             for i in range(10, 1000, 10)])
+        df_2 = ps.DataFrame([{'n': i, 's': str(i)}
+                             for i in range(200, 400, 1)])
+        union = ps.concat([df_1, df_2])
+        self.checkMemoryPrediction(union)
 
     def test_aggregate_memory_prediction(self):
         return NotImplemented
