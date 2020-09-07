@@ -63,7 +63,10 @@ class TestMemoryPredictor(unittest.TestCase):
         self.checkMemoryPrediction(union)
 
     def test_aggregate_memory_prediction(self):
-        return NotImplemented
+        df_1 = ps.DataFrame([{'n': i, 's': str(i)}
+                             for i in range(10, 1000, 10)])
+        summed = df_1.sum()
+        self.checkMemoryPrediction(summed)
 
     def test_grouped_aggregate_memory_prediction(self):
         return NotImplemented
