@@ -68,8 +68,15 @@ class TestMemoryPredictor(unittest.TestCase):
     def test_grouped_aggregate_memory_prediction(self):
         return NotImplemented
 
-    def test_arithmetic_memory_prediction(self):
-        return NotImplemented
+    def test_arithmetic_constant_memory_prediction(self):
+        df = ps.DataFrame([{'n': i, 's': i*2} for i in range(100)])
+        added = df.n + 1
+        self.checkMemoryPrediction(added)
+
+    def test_arithmetic_projection_memory_prediction(self):
+        df = ps.DataFrame([{'n': i, 's': i*2} for i in range(100)])
+        df.n += df.s
+        self.checkMemoryPrediction(df)
 
     def test_write_memory_prediction(self):
         return NotImplemented

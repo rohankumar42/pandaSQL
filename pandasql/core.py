@@ -1317,7 +1317,7 @@ class Arithmetic(DataFrame, ArithmeticMixin):
             self._operation_as_str(), self.sources[0].name)
 
     def _predict_memory_from_sources(self):
-        return self.sources[0].memory_usage().sum()
+        return max([o._predict_memory_from_sources() for o in self.operands])
 
     def _pandas(self):
         results = [op.result[op.columns[0]]
