@@ -89,6 +89,62 @@ class TestOffloading(unittest.TestCase):
 
         ps.memory_utils.SAFETY_FACTOR = old_factor
 
+    def test_pandas_final_step_out_of_memory(self):
+        ps.offloading_strategy('NEVER')
+
+        size = 10 ** 4
+
+        base_df = pd.DataFrame([{'n': i, 's': str(i*2)} for i in range(size)])
+        df = ps.DataFrame(base_df)
+
+        memory_thresh = 10 ** 4
+        new_factor = memory_thresh / psutil.virtual_memory().available
+        old_factor = ps.memory_utils.SAFETY_FACTOR
+        ps.memory_utils.SAFETY_FACTOR = new_factor
+
+        # Should execute, but on SQLite since ordered is expected to run
+        # out of memory
+        ordered = df.sort_values(by='n', ascending=False)
+        ordered._compute_pandas()
+        self.assertFalse(ordered._computed_on_pandas)
+        self.assertTrue(ordered._cached_on_sqlite)
+        self.assertTrue(ordered._out_of_memory)
+        self.assertIsNone(ordered._cached_result)
+        self.assertRaises(MemoryError, lambda: ordered.compute())
+
+        ps.memory_utils.SAFETY_FACTOR = old_factor
+
+    def test_pandas_intermediate_step_out_of_memory(self):
+        ps.offloading_strategy('NEVER')
+
+        size = 10 ** 4
+
+        base_df = pd.DataFrame([{'n': i, 's': str(i*2)} for i in range(size)])
+        base_ordered = base_df.sort_values(by='n', ascending=False)
+        base_limit = base_ordered[:10]
+
+        df = ps.DataFrame(base_df)
+
+        memory_thresh = 10 ** 4
+        new_factor = memory_thresh / psutil.virtual_memory().available
+        old_factor = ps.memory_utils.SAFETY_FACTOR
+        ps.memory_utils.SAFETY_FACTOR = new_factor
+
+        # Should execute, but on SQLite since ordered is expected to run
+        # out of memory. The limit should be small enough to be fetched
+        # back to Pandas from SQLite.
+        ordered = df.sort_values(by='n', ascending=False)
+        limit = ordered[:10]
+        limit.compute()
+        self.assertFalse(ordered._computed_on_pandas)
+        self.assertFalse(ordered._cached_on_sqlite)
+        self.assertFalse(limit._computed_on_pandas)
+        self.assertTrue(limit._cached_on_sqlite)
+        self.assertFalse(limit._out_of_memory)
+        assertDataFrameEqualsPandas(limit, base_limit)
+
+        ps.memory_utils.SAFETY_FACTOR = old_factor
+
 
 if __name__ == "__main__":
     unittest.main()
