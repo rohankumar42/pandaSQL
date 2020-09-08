@@ -72,7 +72,7 @@ class BaseFrame(object):
                     deep=True, index=True)
             elif isinstance(self._cached_result, pd.Series):
                 usage = self._cached_result.memory_usage(deep=True, index=True)
-                self._memory_usage = pd.DataFrame(usage)
+                self._memory_usage = pd.Series([usage])
             else:
                 # TODO: handle Aggregator, GroupByDataFrame, GroupByProjection
                 raise RuntimeError('Cannot provide memory usage for a '
@@ -690,9 +690,32 @@ class Update(object):
                                                      self.source.name)
 
     def _predict_memory_from_sources(self):
-        old_mem = self.source.memory_usage().sum()
-        # TODO: figure out type and use size of type
-        new_mem = self.source._count * 8
+        print(type(self.source))
+        mem_usage = self.source.memory_usage()
+        old_mem = mem_usage.sum()
+
+        # Remove memory usage of column, if it existed
+        if self.col in mem_usage:
+            old_mem -= mem_usage[self.col]
+
+        # If constant being written, extrapolate size of the column
+        if isinstance(self.value, Constant):
+            dtype = pd.api.types.pandas_dtype(type(self.value.result))
+            if isinstance(self.value.result, str):
+                itemsize = 8 + sys.getsizeof(self.value.result)
+            else:
+                assert(not dtype.hasobject)
+                itemsize = dtype.itemsize
+            new_mem = self.source._count * itemsize
+
+        # If column being written, just use the size of the column
+        elif isinstance(self.value, ArithmeticMixin):
+            new_mem = self.value.memory_usage().iloc[0]
+
+        else:
+            raise TypeError(f'Unexpected value of type {type(self.value)}')
+
+        print('mem', old_mem, new_mem, old_mem + new_mem)
         return old_mem + new_mem
 
     def __str__(self):

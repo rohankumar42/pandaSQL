@@ -12,12 +12,17 @@ class TestMemoryPredictor(unittest.TestCase):
 
     def checkMemoryPrediction(self, df: ps.DataFrame, delta=0.1):
         compute_all_ancestors(df)
-        predicted = df._predict_memory_from_sources()
+        if df.update is None:
+            predicted = df._predict_memory_from_sources()
+        else:
+            predicted = df.update._predict_memory_from_sources()
 
         df._compute_pandas()
         actual = df._cached_result.memory_usage(deep=True, index=True)
+        print('actual', actual)
         if isinstance(actual, pd.Series):
             actual = actual.sum()
+        print(type(df), actual, predicted)
 
         self.assertAlmostEqual(actual, predicted, delta=delta * actual)
 
@@ -78,11 +83,27 @@ class TestMemoryPredictor(unittest.TestCase):
 
     def test_arithmetic_projection_memory_prediction(self):
         df = ps.DataFrame([{'n': i, 's': i*2} for i in range(100)])
-        df.n += df.s
+        add = df.n + df.s
+        self.checkMemoryPrediction(add)
+
+    def test_write_constant_memory_prediction(self):
+        df = ps.DataFrame([{'n': i, 's': str(i*2)} for i in range(100)])
+        df['int'] = 10
+        self.checkMemoryPrediction(df)
+        df['float'] = 3.14
+        self.checkMemoryPrediction(df)
+        df['str'] = 'pi'
         self.checkMemoryPrediction(df)
 
-    def test_write_memory_prediction(self):
-        return NotImplemented
+    def test_write_column_memory_prediction(self):
+        df = ps.DataFrame([{'n': i, 's': str(i*2)} for i in range(100)])
+        df['m'] = df['n']
+        self.checkMemoryPrediction(df)
+
+    def test_write_arithmetic_memory_prediction(self):
+        df = ps.DataFrame([{'n': i, 's': i*2} for i in range(100)])
+        df['m'] = df.n + df.s ** 2
+        self.checkMemoryPrediction(df)
 
 
 if __name__ == "__main__":
