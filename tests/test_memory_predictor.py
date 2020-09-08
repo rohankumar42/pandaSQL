@@ -83,21 +83,21 @@ class TestMemoryPredictor(unittest.TestCase):
     def test_arithmetic_constant_memory_prediction(self):
         df = ps.DataFrame([{'n': i, 's': i*2} for i in range(100)])
         added = df.n + 1
-        self.checkMemoryPrediction(added)
+        self.checkMemoryPrediction(added, delta=0.0)
 
     def test_arithmetic_projection_memory_prediction(self):
         df = ps.DataFrame([{'n': i, 's': i*2} for i in range(100)])
         added = df.n + df.s
-        self.checkMemoryPrediction(added)
+        self.checkMemoryPrediction(added, delta=0.0)
 
     def test_write_constant_memory_prediction(self):
         df = ps.DataFrame([{'n': i, 's': str(i*2)} for i in range(100)])
         df['int'] = 10
-        self.checkMemoryPrediction(df)
+        self.checkMemoryPrediction(df, delta=0.0)
         df['float'] = 3.14
-        self.checkMemoryPrediction(df)
+        self.checkMemoryPrediction(df, delta=0.0)
         df['str'] = 'pi'
-        self.checkMemoryPrediction(df)
+        self.checkMemoryPrediction(df, delta=0.0)
 
     def test_write_column_memory_prediction(self):
         df = ps.DataFrame([{'n': i, 's': str(i*2)} for i in range(100)])
