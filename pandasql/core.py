@@ -690,7 +690,6 @@ class Update(object):
                                                      self.source.name)
 
     def _predict_memory_from_sources(self):
-        print(type(self.source))
         mem_usage = self.source.memory_usage()
         old_mem = mem_usage.sum()
 
@@ -715,7 +714,6 @@ class Update(object):
         else:
             raise TypeError(f'Unexpected value of type {type(self.value)}')
 
-        print('mem', old_mem, new_mem, old_mem + new_mem)
         return old_mem + new_mem
 
     def __str__(self):
@@ -1104,7 +1102,6 @@ class Aggregator(DataFrame):
             self.final_type = None
 
     def _predict_memory_from_sources(self):
-        print('enter', id(self))
         if self.grouped:
             # When grouping by columns (C1, ..., Cn), if the columns are
             # independent, the number of unique groups will be the product
@@ -1121,17 +1118,10 @@ class Aggregator(DataFrame):
             row_usage = data_source.memory_usage()[self.columns].sum()
             new_prediction = index_usage + (num_groups / prev_rows * row_usage)
         else:
-            print('DEBUG')
             data_source = self.sources[0]
-            print(type(data_source), data_source.name, id(data_source))
-            print(data_source.columns.dtype)
-            print(len(data_source.columns))
-            print(sys.getsizeof(data_source.columns))
             index_usage = data_source.columns.memory_usage(deep=True)
-            print(index_usage)
             new_len = len(data_source.columns)
             new_prediction = index_usage + new_len * 8
-            print(new_prediction)
         # TODO: This assumes that the size of the aggregated result will be the
         # same as that of a single value of the column. This assumption holds
         # for fixed-size types like ints and floats, but not for strings.
