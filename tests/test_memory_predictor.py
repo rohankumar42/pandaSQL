@@ -69,7 +69,10 @@ class TestMemoryPredictor(unittest.TestCase):
         self.checkMemoryPrediction(summed)
 
     def test_grouped_aggregate_memory_prediction(self):
-        return NotImplemented
+        df_1 = ps.DataFrame([{'n': i/4, 's': str(i)}
+                             for i in range(10, 1000, 10)])
+        summed = df_1.groupby('n').prod()
+        self.checkMemoryPrediction(summed)
 
     def test_arithmetic_constant_memory_prediction(self):
         df = ps.DataFrame([{'n': i, 's': i*2} for i in range(100)])
