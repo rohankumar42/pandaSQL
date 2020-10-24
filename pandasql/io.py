@@ -19,7 +19,7 @@ def read_csv(file_name, name=None, sql_load=False, **kwargs):
     if sql_load:    # read through SQLite
         return _csv_to_sqlite(file_name, name=name, **kwargs)
 
-    estimated_size = _estimate_pandas_memory_from_csv(file_name)
+    estimated_size = _estimate_pandas_memory_from_csv(file_name, **kwargs)
 
     if estimated_size > _free_memory():
         return _read_csv_by_chunking(file_name, name=name, **kwargs)
