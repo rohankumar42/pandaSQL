@@ -184,7 +184,7 @@ class TestPandasExecution(unittest.TestCase):
         assertDataFrameEqualsPandas(df['n'].agg(['max', 'sum', 'min']),
                                     base_df['n'].agg(['max', 'sum', 'min']))
 
-        # # Multi-column multi-aggregation
+        # Multi-column multi-aggregation
         assertDataFrameEqualsPandas(df.agg('max'),
                                     base_df.agg('max'))
         assertDataFrameEqualsPandas(df.agg(['max', 'sum']),
@@ -355,6 +355,35 @@ class TestPandasExecution(unittest.TestCase):
         pd.testing.assert_frame_equal(merged.result, base_merged)
         pd.testing.assert_frame_equal(agg.result, base_agg)
         pd.testing.assert_frame_equal(ordered.result, base_ordered)
+
+    def test_rename_columns(self):
+        base_df = pd.DataFrame([{'n': i, 's': str(i*2)} for i in range(10)])
+        df = ps.DataFrame(base_df)
+        base_nc = base_df.rename(columns={'n': 'b'})
+        nc = df.rename(columns={'n': 'b'})
+
+        base_nc['b'] += 1
+        nc['b'] += 1
+        assertDataFrameEqualsPandas(nc, base_nc)
+
+    def test_rename_columns_and_compute(self):
+        base_df = pd.DataFrame([{'n': i, 's': (i*2)} for i in range(10)])
+        df = ps.DataFrame(base_df)
+
+        expected = base_df[base_df['n'].between(5, 9, inclusive=False)]
+        expected = expected.rename(columns={'n': 'b'})
+
+        df = df[df['n'] > 5]
+        base_df = base_df[base_df['n'] > 5]
+
+        base_nc = base_df.rename(columns={'n': 'b'})
+        nc = df.rename(columns={'n': 'b'})
+
+        nc = nc[nc['b'] < 9]
+        base_nc = base_nc[base_nc['b'] < 9]
+
+        assertDataFrameEqualsPandas(nc, base_nc)
+        assertDataFrameEqualsPandas(nc, expected)
 
     def test_drop_duplicates(self):
         base_df = pd.DataFrame([{'n': int(i/2), 's': 0} for i in range(10)])
