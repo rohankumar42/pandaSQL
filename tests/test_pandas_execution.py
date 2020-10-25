@@ -172,6 +172,40 @@ class TestPandasExecution(unittest.TestCase):
         assertDataFrameEqualsPandas(df.any(), base_df.any())
         assertDataFrameEqualsPandas(df.all(), base_df.all())
 
+    def test_multiple_aggregators(self):
+        base_df = pd.DataFrame([{'m': i, 'n': 10-i} for i in range(0, 10)])
+        df = ps.DataFrame(base_df)
+
+        # Single-column multi-aggregation
+        self.assertEqual(df['n'].agg('max').compute(),
+                         base_df['n'].agg('max'))
+        assertDataFrameEqualsPandas(df['n'].agg(['max', 'sum']),
+                                    base_df['n'].agg(['max', 'sum']))
+        assertDataFrameEqualsPandas(df['n'].agg(['max', 'sum', 'min']),
+                                    base_df['n'].agg(['max', 'sum', 'min']))
+
+        # # Multi-column multi-aggregation
+        assertDataFrameEqualsPandas(df.agg('max'),
+                                    base_df.agg('max'))
+        assertDataFrameEqualsPandas(df.agg(['max', 'sum']),
+                                    base_df.agg(['max', 'sum']))
+        assertDataFrameEqualsPandas(df.agg(['max', 'sum', 'min']),
+                                    base_df.agg(['max', 'sum', 'min']))
+
+    def test_grouped_multiple_aggregators(self):
+        base_df = pd.DataFrame([
+            {'a': str(i), 'b': str(j), 'c': 100*i, 'd': -j}
+            for i in range(3) for j in range(3)
+        ])
+        df = ps.DataFrame(base_df)
+
+        grouped = df.groupby(['a', 'b'], as_index=False)
+        base_grouped = base_df.groupby(['a', 'b'], as_index=False)
+        assertDataFrameEqualsPandas(grouped.agg('max'),
+                                    base_grouped.agg('max'))
+        assertDataFrameEqualsPandas(grouped.agg(['max', 'count']),
+                                    base_grouped.agg(['max', 'count']))
+
     def test_groupby(self):
         base_df = pd.DataFrame([
             {'a': str(i), 'b': str(j), 'c': 100*i, 'd': -j}
