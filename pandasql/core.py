@@ -2,6 +2,7 @@ import os
 import sys
 from typing import List
 from tempfile import mkstemp
+from itertools import product
 import pandas as pd
 
 from pandasql.graph_utils import _get_dependency_graph, _topological_sort, \
@@ -17,6 +18,7 @@ SQL_CON = get_sqlite_connection(DB_FILE)
 OFFLOADING_STRATEGY = None
 SQLITE_CHUNK_SIZE = 10000
 COST_MODEL = CostModel()
+MAGIC_SEP = '_pAnDaSqLsEpArAtOr_'
 
 
 def require_result(func):
@@ -237,6 +239,22 @@ class BaseFrame(object):
 
     def all(self):
         return Aggregator('all', self)
+
+    def aggregate(self, *args, **kwargs):
+        return self.agg(*args, **kwargs)
+
+    def agg(self, func: List[str]):
+        if isinstance(func, str):
+            func = [func]
+        # To replicate Pandas semantics, in case of a non-grouped source,
+        # we represent this as a union of individual Aggregators,
+        # and in case of a grouped source, as a join
+        if len(func) == 1:
+            return Aggregator(func[0], self)
+        elif not isinstance(self, GroupByDataFrame):
+            return MultiAggregator(aggs=func, agg_source=self)
+        else:
+            return GroupedMultiAggregator(aggs=func, agg_source=self)
 
     def __getattr__(self, attr):
         if attr in SUPPORTED_VIA_FALLBACK:
@@ -560,24 +578,7 @@ class DataFrame(BaseFrame):
         self.__dict__.update(new.__dict__)
 
     def rename(self, columns):
-        if not isinstance(columns, dict):
-            raise TypeError('Column names must be of type dict, but found {}'
-                            .format(type(columns)))
-
-        old_cols = list(columns.keys())
-        new_cols = list(columns.values())
-
-        new = DataFrame(sources=[self])
-        new.update = UpdateNames(self, new, old_cols, new_names=new_cols)
-
-        # If column is new, add it to columns
-        new.columns = self.columns
-        for old_col, new_col in zip(old_cols, new_cols):
-            col_index = new.columns.get_loc(old_col)
-            new.columns = new.columns.drop(old_col)
-            new.columns = new.columns.insert(col_index, new_col)
-
-        return new
+        return UpdateNames(self, updates=columns)
 
     def head(self, n=5):
         return self[:n]
@@ -725,31 +726,36 @@ class Update(object):
                                                    val)
 
 
-class UpdateNames(object):
-    def __init__(self, source: DataFrame, dest: DataFrame, cols: str,
-                 new_names: list):
-        self.source = source
-        self.dest = dest
-        self.cols = cols
+class UpdateNames(DataFrame):
+    def __init__(self, source: DataFrame, updates: dict, name=None):
+        if not isinstance(updates, dict):
+            raise TypeError('Column names must be of type dict, but found {}'
+                            .format(type(updates)))
 
-        columns = self.source.columns
+        self.updates = updates
+        columns = source.columns
+        names = source.columns
 
-        if len(cols) != len(new_names):
-            raise ValueError('Length of columns and new names do not match')
+        for old, new in self.updates.items():
+            idx = columns.get_loc(old) if old in columns else len(columns)
 
-        for col, new_name in zip(cols, new_names):
-            col_index = columns.get_loc(
-                col) if col in columns else len(columns)
-            columns = columns.drop(col) if col in columns else columns
+            columns = columns.drop(old) if old in columns else columns
+            columns = columns.insert(idx, new)
 
-            new_column = '{} AS {}'.format(col, new_name)
-            columns = columns.insert(col_index, new_column)
+            names = names.drop(old) if old in names else names
+            new_name = '{} AS {}'.format(old, new)
+            names = names.insert(idx, new_name)
 
-        self._sql_query = 'SELECT {} FROM {}'.format(', '.join(columns),
-                                                     self.source.name)
+        super().__init__(sources=[source], name=name)
+        self.columns = columns
+        self._sql_query = 'SELECT {} FROM {}'.format(', '.join(names),
+                                                     source.name)
 
     def _predict_memory_from_sources(self):
-        return self.source.memory_usage().sum()
+        return self.sources[0].memory_usage().sum()
+
+    def _pandas(self):
+        return self.sources[0].result.rename(columns=self.updates)
 
 
 class Projection(DataFrame, ArithmeticMixin):
@@ -939,6 +945,16 @@ class Join(DataFrame):
                         left_on=self.left_keys, right_on=self.right_keys)
 
 
+class MultiJoin(Join):
+    def __init__(self, sources: List[DataFrame], join_keys, name=None):
+        n = len(sources)
+        assert(n >= 2)
+        current = sources[0]
+        for i in range(1, n-1):
+            current = Join(current, sources[i], join_keys=join_keys)
+        super().__init__(current, sources[n-1], join_keys=join_keys)
+
+
 class Union(DataFrame):
     def __init__(self, sources: List[DataFrame], name=None):
         super().__init__(name=name, sources=sources)
@@ -1075,11 +1091,10 @@ class Aggregator(DataFrame):
         self.agg_sql = self.AGGREGATORS[agg]
         self.grouped = isinstance(source, GroupByDataFrame)
 
-        # TODO: only use valid columns for aggregation operation
-        cols = ['{}({}) AS {}'.format(self.agg_sql, c, c)
-                for c in source.columns]
-
         if not self.grouped:
+            # TODO: only use valid columns for aggregation operation
+            cols = ['{}({}) AS {}'.format(self.agg_sql, c, c)
+                    for c in source.columns]
             self._sql_query = 'SELECT {} FROM {}'.format(', '.join(cols),
                                                          source.name)
         else:
@@ -1091,6 +1106,8 @@ class Aggregator(DataFrame):
             self._sql_query = 'SELECT {} FROM {} GROUP BY {}' \
                 .format(', '.join(cols), source.base_name,
                         ', '.join(source.groupby_cols))
+            self.as_index = source.as_index
+            self.groupby_cols = source.groupby_cols
 
         self.columns = source.columns
 
@@ -1144,6 +1161,10 @@ class Aggregator(DataFrame):
 
     def process_result(self, result):
         '''This function will be called by BaseFrame.compute'''
+        if self.grouped and self.as_index and isinstance(result, pd.DataFrame) \
+                and all(c in result.columns for c in self.groupby_cols):
+            result = result.set_index(self.groupby_cols)
+
         if len(result) == 1:
             row = result.iloc[0]
             if isinstance(row, pd.Series):
@@ -1165,6 +1186,75 @@ class Aggregator(DataFrame):
                 ret = self.final_type(ret)
 
         return ret
+
+
+class MultiAggregator(Union):
+    def __init__(self, aggs, agg_source: DataFrame, name=None):
+        self.aggs = aggs
+        sources = [Aggregator(agg, agg_source) for agg in aggs]
+        super().__init__(sources=sources, name=name)
+
+    def process_result(self, result):
+        '''This function will be called by BaseFrame.compute'''
+
+        if isinstance(result, pd.DataFrame):
+            if len(result.columns) == 1:  # Single column, convert to series
+                result = result[result.columns[0]]
+                result.name = self.columns[0]
+                if len(result) == 1:  # Single value
+                    result = result[0]
+            elif len(self.aggs) == 1:  # Multiple columns, single aggregator
+                result = result.iloc[0]
+                result.name = None
+            if len(self.aggs) > 1:
+                result.index = self.aggs
+        elif isinstance(result, pd.Series):
+            result.name = self.columns[0]
+            if len(result) == 1:
+                result = result[0]
+
+        return result
+
+    def _pandas(self):
+        results = []
+        for s in self.sources:
+            result = s.result
+            if not isinstance(result, (pd.Series, pd.DataFrame)):
+                result = pd.DataFrame([result])
+            elif isinstance(result, pd.Series):
+                result = pd.DataFrame([result.to_dict()])
+            results.append(result)
+        return pd.concat(results)
+
+
+class GroupedMultiAggregator(MultiJoin):
+    def __init__(self, aggs, agg_source: GroupByDataFrame, name=None):
+        self.aggs = aggs
+        self.agg_source = agg_source
+        self.as_index = self.agg_source.as_index
+        self.groupby_cols = self.agg_source.groupby_cols
+        sources = []
+        for agg in aggs:
+            source = Aggregator(agg, agg_source)
+            new = source.rename({c: c + MAGIC_SEP + agg for c in source.columns
+                                 if c not in agg_source.groupby_cols})
+            sources.append(new)
+
+        super().__init__(sources=sources, join_keys=self.groupby_cols,
+                         name=name)
+
+    def process_result(self, result):
+        '''This function will be called by BaseFrame.compute'''
+        if self.as_index and isinstance(result, pd.DataFrame) \
+                and all(c in result.columns for c in self.groupby_cols):
+            result = result.set_index(self.groupby_cols)
+        tuples = map(lambda c: c.split(MAGIC_SEP), result.columns)
+        result.columns = pd.MultiIndex.from_tuples(tuples)
+
+        orig_columns = {c.split(MAGIC_SEP)[0] for c in self.columns
+                        if c not in self.groupby_cols}
+        result = result[product(orig_columns, self.aggs)]
+        return result
 
 
 ##############################################################################
