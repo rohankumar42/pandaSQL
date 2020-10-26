@@ -1242,8 +1242,6 @@ class GroupedMultiAggregator(MultiJoin):
 
         super().__init__(sources=sources, join_keys=self.groupby_cols,
                          name=name)
-        orig_columns = {c.split(MAGIC_SEP)[0] for c in self.columns
-                        if c not in self.groupby_cols}
 
     def process_result(self, result):
         '''This function will be called by BaseFrame.compute'''
