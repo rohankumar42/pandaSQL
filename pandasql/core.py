@@ -1245,6 +1245,7 @@ class GroupedMultiAggregator(MultiJoin):
 
     def process_result(self, result):
         '''This function will be called by BaseFrame.compute'''
+        result = result.copy(deep=True)
         if self.as_index and isinstance(result, pd.DataFrame) \
                 and all(c in result.columns for c in self.groupby_cols):
             result = result.set_index(self.groupby_cols)
