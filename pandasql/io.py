@@ -11,7 +11,7 @@ CHUNKSIZE = 10_000
 
 def read_csv(file_name, name=None, sql_load=False, **kwargs):
 
-    if 'nrows' in kwargs:
+    if kwargs.get('nrows') is not None:
         raise ValueError('nrows is not supported')
 
     name = name or _new_name()
