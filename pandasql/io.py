@@ -41,7 +41,8 @@ def read_pickle(*args, name=None, **kwargs):
 
 
 def _csv_to_sqlite(file_name, name, **kwargs):
-    chunk = pd.read_csv(file_name, nrows=SAMPLE_LINES, **kwargs)
+    kwargs['nrows'] = SAMPLE_LINES
+    chunk = pd.read_csv(file_name, **kwargs)
 
     # sends first N lines to sqlite to establish correct types
     chunk.to_sql(name=name, con=SQL_CON, index=False, if_exists='append')
