@@ -11,7 +11,7 @@ CHUNKSIZE = 10_000
 
 def read_csv(file_name, name=None, sql_load=False, **kwargs):
 
-    if 'nrows' in kwargs:
+    if kwargs.get('nrows') is not None:
         raise ValueError('nrows is not supported')
 
     name = name or _new_name()
@@ -41,14 +41,18 @@ def read_pickle(*args, name=None, **kwargs):
 
 
 def _csv_to_sqlite(file_name, name, **kwargs):
-    chunk = pd.read_csv(file_name, nrows=SAMPLE_LINES, **kwargs)
+    kwargs['nrows'] = SAMPLE_LINES
+    chunk = pd.read_csv(file_name, **kwargs)
 
     # sends first N lines to sqlite to establish correct types
     chunk.to_sql(name=name, con=SQL_CON, index=False, if_exists='append')
 
     # loads rest of data via direct sqlite CLI call
-    subprocess.call(["sqlite3", DB_FILE, ".mode csv",
-                     f".import  \'| tail -n +{SAMPLE_LINES + 2} {file_name}\' {name}"])   # noqa
+    cmd = ["sqlite3", DB_FILE, ".mode csv"]
+    if kwargs.get('delimiter') is not None:
+        cmd += [f".separator \"{kwargs['delimiter']}\""]
+    cmd += [f".import  \'| tail -n +{SAMPLE_LINES + 2} {file_name}\' {name}"]
+    subprocess.call(cmd)
 
     df = DataFrame(None, name=name, offload=False, loaded_on_sqlite=True)
     df.columns = chunk.columns
