@@ -47,8 +47,11 @@ def _csv_to_sqlite(file_name, name, **kwargs):
     chunk.to_sql(name=name, con=SQL_CON, index=False, if_exists='append')
 
     # loads rest of data via direct sqlite CLI call
-    subprocess.call(["sqlite3", DB_FILE, ".mode csv",
-                     f".import  \'| tail -n +{SAMPLE_LINES + 2} {file_name}\' {name}"])   # noqa
+    cmd = ["sqlite3", DB_FILE, ".mode csv"]
+    if kwargs.get('delimiter') is not None:
+        cmd += [f".separator \"{kwargs['delimiter']}\""]
+    cmd += [f".import  \'| tail -n +{SAMPLE_LINES + 2} {file_name}\' {name}"]
+    subprocess.call(cmd)
 
     df = DataFrame(None, name=name, offload=False, loaded_on_sqlite=True)
     df.columns = chunk.columns
