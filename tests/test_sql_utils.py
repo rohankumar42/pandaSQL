@@ -14,7 +14,3 @@ class TestSQLUtils(unittest.TestCase):
         ps.set_database_file(new_file, delete=True)
         self.assertFalse(os.path.exists(old_file))
         self.assertTrue(os.path.exists(new_file))
-
-        self.assertEqual(os.path.getsize(new_file), 0)
-        _ = ps.DataFrame([{'n': i, 's': str(i*2)} for i in range(10)])
-        self.assertGreater(os.path.getsize(new_file), 0)

@@ -16,8 +16,8 @@ def read_csv(file_name, name=None, sql_load=False, **kwargs):
 
     name = name or _new_name()
 
-    if sql_load:    # read through SQLite
-        return _csv_to_sqlite(file_name, name=name, **kwargs)
+    if sql_load:    # read through DuckDB
+        return _csv_to_duckdb(file_name, name=name, **kwargs)
 
     estimated_size = _estimate_pandas_memory_from_csv(file_name, **kwargs)
 

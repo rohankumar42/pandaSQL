@@ -91,7 +91,6 @@ class BaseFrame(object):
             self._cached_on_sqlite = True
 
     def compute(self):
-        print(f'called compute on {self.name} {type(self)}')
         # TODO: explore if there are situations when some part of the
         # computation should be offloaded, whereas others should not.
 
@@ -115,7 +114,6 @@ class BaseFrame(object):
         return self.result
 
     def _compute_pandas(self, offload=False):
-        print(f'called compute_pandas on {self.name} {type(self)}')
         if self._cached_result is None:
             graph = _get_dependency_graph(self, on='pandas')
             ordered_deps = _topological_sort(graph)
@@ -178,7 +176,6 @@ class BaseFrame(object):
                         break
 
     def _compute_sqlite(self):
-        print(f'called compute_sqlite on {self.name} {type(self)}')
         if not self._cached_on_sqlite:
             # Compute result and store in SQLite table
             query = self.sql(dependencies=True)
