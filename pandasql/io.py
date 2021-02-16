@@ -55,6 +55,28 @@ def _csv_to_sqlite(file_name, name, **kwargs):
     return df
 
 
+def _csv_to_duckdb(file_name, name, **kwargs):
+    SQL_CON.execute(
+        f"CREATE TABLE {name} AS "
+        f"SELECT * FROM read_csv_auto('{file_name}');")
+
+    description = SQL_CON.execute(f'DESCRIBE {name};').fetchall()
+    column_names = [info[0] for info in description]
+
+    if 'names' in kwargs:
+        # If columns are specified explicitly, alter column names in DuckDB
+        for old, new in zip(column_names, kwargs['names']):
+            SQL_CON.execute(f"ALTER TABLE {name} "
+                            f"RENAME COLUMN {old} TO {new};")
+        column_index = pd.Index(kwargs['names'])
+    else:
+        column_index = pd.Index(column_names)
+
+    df = DataFrame(None, name=name, offload=False, loaded_on_sqlite=True)
+    df.columns = column_index
+    return df
+
+
 def _read_csv_by_chunking(file_name, name, **kwargs):
     for chunk in pd.read_csv(file_name, chunksize=CHUNKSIZE,
                              nrows=None, **kwargs):

@@ -1,3 +1,4 @@
+import duckdb
 import sqlite3
 
 
@@ -112,4 +113,10 @@ def get_sqlite_connection(file_name):
     if len(dbstat_enabled) == 0:
         raise ImportError('sqlite3 must be compiled with '
                           'SQLITE_ENABLE_DBSTAT_VTAB to use pandaSQL')
+    return con
+
+
+def get_duckdb_connection(file_name):
+    print('Starting duckdb connection to file', file_name)
+    con = duckdb.connect(file_name)
     return con

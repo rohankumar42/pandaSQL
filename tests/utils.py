@@ -17,10 +17,10 @@ def assertDataFrameEqualsPandas(df: ps.DataFrame,
         expected_df = expected_df[expected_df.columns.sort_values()]
 
         pd.testing.assert_frame_equal(result, expected_df,
-                                      *args, **kwargs)
+                                      *args, check_dtype=False, **kwargs)
     elif isinstance(expected_df, pd.Series):
         pd.testing.assert_series_equal(result, expected_df,
-                                       *args, **kwargs)
+                                       *args, check_dtype=False, **kwargs)
     else:
         raise TypeError("Unexpected type {}".format(type(expected_df)))
 

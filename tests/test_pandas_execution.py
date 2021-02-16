@@ -9,6 +9,7 @@ class TestPandasExecution(unittest.TestCase):
 
     def setUp(self):
         ps.offloading_strategy('NEVER')
+        ps.use_memory_prediction(False)
 
     def test_projection(self):
         base_df = pd.DataFrame([{'n': i, 's': str(i*2)} for i in range(10)])
@@ -122,10 +123,10 @@ class TestPandasExecution(unittest.TestCase):
 
         assertDataFrameEqualsPandas(df['n'] + 2 * df['m'],
                                     base_df['n'] + 2 * base_df['m'])
-        assertDataFrameEqualsPandas((df['n'] - 1) // (2 ** (df['m'] % 3)),
-                                    (base_df['n'] - 1) // (2 ** (base_df['m'] % 3)))  # noqa
-        assertDataFrameEqualsPandas(abs(df['n']) // 5 & df['m'],
-                                    abs(base_df['n']) // 5 & base_df['m'])
+        assertDataFrameEqualsPandas((df['n'] - 1) / (2 ** (df['m'] % 3)),
+                                    (base_df['n'] - 1) / (2 ** (base_df['m'] % 3)))  # noqa
+        assertDataFrameEqualsPandas(abs(df['n']) / 5 + df['m'],
+                                    abs(base_df['n']) / 5 + base_df['m'])
         assertDataFrameEqualsPandas(df['n'] | 0 ^ ~df['m'],
                                     base_df['n'] | 0 ^ ~base_df['m'])
 
@@ -219,8 +220,8 @@ class TestPandasExecution(unittest.TestCase):
         assertDataFrameEqualsPandas(res, base_res)
 
         # groupby with group names in index
-        res = df.groupby('a', as_index=True).prod()
-        base_res = base_df.groupby('a', as_index=True).prod()
+        res = df.groupby('a', as_index=True).max()
+        base_res = base_df.groupby('a', as_index=True).max()
         assertDataFrameEqualsPandas(res, base_res)
 
         # Projection before aggregation
@@ -229,8 +230,11 @@ class TestPandasExecution(unittest.TestCase):
         assertDataFrameEqualsPandas(res, base_res)
 
         # Projection before aggregation with group names in index
-        res = df.groupby(['a', 'b'], as_index=True)['c'].all()
-        base_res = base_df.groupby(['a', 'b'], as_index=True)['c'].all()
+        res = df.groupby(['a', 'b'], as_index=True)['c'].sum()
+        base_res = base_df.groupby(['a', 'b'], as_index=True)['c'].sum()
+        print(ps.offloading_strategy())
+        print(res.compute(), type(res.compute()))
+        print(base_res, type(base_res))
         assertDataFrameEqualsPandas(res, base_res)
 
     def test_write_column(self):
@@ -311,14 +315,10 @@ class TestPandasExecution(unittest.TestCase):
         ordered = agg.sort_values(by=key, ascending=False)
         limit = ordered.head(3)
 
-        # This should trigger computation
-        self.assertEqual(str(limit), str(base_limit))
-
-        # All dependencies should also have cached results
-        pd.testing.assert_frame_equal(merged.result, base_merged)
-        pd.testing.assert_frame_equal(agg.result, base_agg)
-        pd.testing.assert_frame_equal(ordered.result, base_ordered)
-        pd.testing.assert_frame_equal(limit.result, base_limit)
+        assertDataFrameEqualsPandas(merged, base_merged)
+        assertDataFrameEqualsPandas(agg, base_agg)
+        assertDataFrameEqualsPandas(ordered, base_ordered)
+        assertDataFrameEqualsPandas(limit, base_limit)
 
     def test_complex_write_query(self):
         base_df_1 = pd.DataFrame([
@@ -338,7 +338,7 @@ class TestPandasExecution(unittest.TestCase):
             (base_merged['d'] - base_merged['f'])
         base_agg = base_merged.groupby('key', as_index=False)[['a', 'b']].sum()
         base_agg['sum'] = base_agg['a'] + base_agg['b']
-        base_ordered = base_agg.sort_values(by='sum')
+        base_ordered = base_agg.sort_values(by=['sum', 'key'])
 
         merged = df_1.merge(df_2, on=['a', 'b'])
         merged['diff'] = merged['c'] - merged['e']
@@ -346,15 +346,13 @@ class TestPandasExecution(unittest.TestCase):
             (merged['d'] - merged['f'])
         agg = merged.groupby('key')[['a', 'b']].sum()
         agg['sum'] = agg['a'] + agg['b']
-        ordered = agg.sort_values(by='sum')
+        ordered = agg.sort_values(by=['sum', 'key'])
 
-        # This should trigger computation
-        self.assertEqual(str(ordered), str(base_ordered))
-
-        # All dependencies should also have cached results
-        pd.testing.assert_frame_equal(merged.result, base_merged)
-        pd.testing.assert_frame_equal(agg.result, base_agg)
-        pd.testing.assert_frame_equal(ordered.result, base_ordered)
+        assertDataFrameEqualsPandas(merged, base_merged)
+        # Sort values since DuckDB doesn't make order guarantees
+        assertDataFrameEqualsPandas(agg.sort_values('key'),
+                                    base_agg.sort_values('key'))
+        assertDataFrameEqualsPandas(ordered, base_ordered)
 
     def test_rename_columns(self):
         base_df = pd.DataFrame([{'n': i, 's': str(i*2)} for i in range(10)])

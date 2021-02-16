@@ -9,6 +9,7 @@ class TestMemoryPredictor(unittest.TestCase):
 
     def setUp(self):
         ps.offloading_strategy('NEVER')
+        ps.use_memory_prediction(True)
 
     def checkMemoryPrediction(self, df: ps.DataFrame, delta=0.1):
         compute_all_ancestors(df)

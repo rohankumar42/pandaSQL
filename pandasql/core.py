@@ -1,24 +1,26 @@
 import os
 import sys
+import math
 from typing import List
-from tempfile import mkstemp
+from tempfile import mktemp
 from itertools import product
 import pandas as pd
 
 from pandasql.graph_utils import _get_dependency_graph, _topological_sort, \
     _filter_ancestors
-from pandasql.sql_utils import get_sqlite_connection
+from pandasql.sql_utils import get_duckdb_connection
 from pandasql.cost_model import CostModel
 from pandasql.memory_utils import _free_memory, \
     _estimate_pandas_memory_from_sqlite
 from pandasql.api_status import SUPPORTED_VIA_FALLBACK
 
-DB_FILE = mkstemp("_pandasql.db")[1]
-SQL_CON = get_sqlite_connection(DB_FILE)
+DB_FILE = mktemp("_pandasql.db")
+SQL_CON = get_duckdb_connection(DB_FILE)
 OFFLOADING_STRATEGY = None
+USE_MEMORY_PREDICTION = None
 SQLITE_CHUNK_SIZE = 10000
 COST_MODEL = CostModel()
-MAGIC_SEP = '_pAnDaSqLsEpArAtOr_'
+MAGIC_SEP = '_pandasqlseparator_'
 
 
 def require_result(func):
@@ -63,6 +65,7 @@ class BaseFrame(object):
             else:
                 return None
         elif hasattr(self, 'process_result'):  # Post-process result if needed
+            print('calling self.process_result')
             return self.process_result(self._cached_result)
         else:
             return self._cached_result
@@ -84,11 +87,11 @@ class BaseFrame(object):
     def _offload(self):
         assert(self._cached_result is not None)
         if not self._cached_on_sqlite:
-            self._cached_result.to_sql(name=self.name, con=SQL_CON,
-                                       index=False)
+            SQL_CON.register(self.name, self._cached_result)
             self._cached_on_sqlite = True
 
     def compute(self):
+        print(f'called compute on {self.name} {type(self)}')
         # TODO: explore if there are situations when some part of the
         # computation should be offloaded, whereas others should not.
 
@@ -112,6 +115,7 @@ class BaseFrame(object):
         return self.result
 
     def _compute_pandas(self, offload=False):
+        print(f'called compute_pandas on {self.name} {type(self)}')
         if self._cached_result is None:
             graph = _get_dependency_graph(self, on='pandas')
             ordered_deps = _topological_sort(graph)
@@ -128,11 +132,15 @@ class BaseFrame(object):
                         predicted = t.update._predict_memory_from_sources()
                     too_big = predicted >= _free_memory()
 
+                    if too_big and not USE_MEMORY_PREDICTION:
+                        too_big = False
+
                     # Run on Pandas if the operation is supported only via
                     # Pandas, or if it is not expected to run out of memory
                     # TODO: Fallback operations might run out of memory but
                     # we can't run them on SQLite! Log a warning for them?
-                    if isinstance(t, FallbackOperation) or not too_big:
+                    pandas_only = isinstance(t, FallbackOperation)
+                    if pandas_only or not too_big:
                         if t.update is None:
                             result = t._pandas()
                         else:   # Trigger the pending lazy write for this df
@@ -170,7 +178,7 @@ class BaseFrame(object):
                         break
 
     def _compute_sqlite(self):
-
+        print(f'called compute_sqlite on {self.name} {type(self)}')
         if not self._cached_on_sqlite:
             # Compute result and store in SQLite table
             query = self.sql(dependencies=True)
@@ -179,21 +187,17 @@ class BaseFrame(object):
             self._cached_on_sqlite = True
 
         if self._cached_result is None:
+            # TODO: DuckDB does not have DBSTAT tracking. If we still want to
+            # do memory prediction, figure out a different way to do it.
 
-            estimated = _estimate_pandas_memory_from_sqlite(self.name)
-            if estimated > _free_memory():
-                # Cannot bring back result because it's too big for memory
-                self._out_of_memory = True
-            else:
-                # Read table as Pandas DataFrame
-                read_query = 'SELECT * FROM {}'.format(self.name)
-                self._cached_result = pd.read_sql_query(
-                    read_query, con=SQL_CON)
-                self.columns = self._cached_result.columns
+            # Read table as Pandas DataFrame using efficient DuckDB transfer
+            read_query = 'SELECT * FROM {}'.format(self.name)
+            self._cached_result = SQL_CON.execute(read_query).fetchdf()
+            self.columns = self._cached_result.columns
 
-                # Compute stats about result
-                if isinstance(self._cached_result, pd.DataFrame):
-                    self._count = len(self._cached_result)
+            # Compute stats about result
+            if isinstance(self._cached_result, pd.DataFrame):
+                self._count = len(self._cached_result)
 
     def _pandas(self):
         raise NotImplementedError("To be implemented by subclasses")
@@ -390,7 +394,7 @@ class ArithmeticMixin(object):
         return Divide(self, other)
 
     def __floordiv__(self, other):
-        return FloorDivide(self, other)
+        return Floor(Divide(self, other))
 
     def __mod__(self, other):
         return Modulo(self, other)
@@ -420,7 +424,7 @@ class ArithmeticMixin(object):
         return Divide(other, self)
 
     def __rfloordiv__(self, other):
-        return FloorDivide(other, self)
+        return Floor(Divide(other, self))
 
     def __rmod__(self, other):
         return Modulo(other, self)
@@ -1145,9 +1149,12 @@ class Aggregator(DataFrame):
         return new_prediction
 
     def _pandas(self):
+        print('in agg pandas')
         if self.grouped:
             result = getattr(self.sources[0].result, self.agg)()
+            print('grouped agg pandas, len(columns):', len(result.columns))
             if len(result.columns) == 1:
+                print('agg to series!')
                 result = result[result.columns[0]]
 
         else:
@@ -1161,7 +1168,7 @@ class Aggregator(DataFrame):
 
     def process_result(self, result):
         '''This function will be called by BaseFrame.compute'''
-        if self.grouped and self.as_index and isinstance(result, pd.DataFrame) \
+        if self.grouped and self.as_index and isinstance(result, pd.DataFrame)\
                 and all(c in result.columns for c in self.groupby_cols):
             result = result.set_index(self.groupby_cols)
 
@@ -1488,14 +1495,13 @@ class Multiply(Arithmetic):
 
 class Divide(Arithmetic):
     def __init__(self, source_1, source_2, name=None):
-        super().__init__('DIV', lambda x, y: x / y, source_1, source_2,
-                         name=name)
+        super().__init__('/', lambda x, y: x / y, source_1, source_2,
+                         name=name, inline=True)
 
 
-class FloorDivide(Arithmetic):
-    def __init__(self, source_1, source_2, name=None):
-        super().__init__('FLOORDIV', lambda x, y: x // y, source_1, source_2,
-                         name=name)
+class Floor(Arithmetic):
+    def __init__(self, source, name=None):
+        super().__init__('FLOOR', math.floor, source, name=name)
 
 
 class Modulo(Arithmetic):
@@ -1512,19 +1518,19 @@ class Power(Arithmetic):
 
 class BitAnd(Arithmetic):
     def __init__(self, source_1, source_2, name=None):
-        super().__init__('BITAND', lambda x, y: x & y, source_1, source_2,
+        super().__init__('BIT_AND', lambda x, y: x & y, source_1, source_2,
                          name=name)
 
 
 class BitOr(Arithmetic):
     def __init__(self, source_1, source_2, name=None):
-        super().__init__('BITOR', lambda x, y: x | y, source_1, source_2,
+        super().__init__('BIT_OR', lambda x, y: x | y, source_1, source_2,
                          name=name)
 
 
 class BitXor(Arithmetic):
     def __init__(self, source_1, source_2, name=None):
-        super().__init__('BITXOR', lambda x, y: x ^ y, source_1, source_2,
+        super().__init__('BIT_XOR', lambda x, y: x ^ y, source_1, source_2,
                          name=name)
 
 
@@ -1554,6 +1560,18 @@ def offloading_strategy(name=None):
 
     else:
         return OFFLOADING_STRATEGY
+
+
+def use_memory_prediction(value=None):
+    if value is not None:
+        if not(isinstance(value, bool)):
+            raise ValueError(f'Unsupported value: {value}')
+
+        global USE_MEMORY_PREDICTION
+        USE_MEMORY_PREDICTION = value
+
+    else:
+        return USE_MEMORY_PREDICTION
 
 
 def choose_compute_mechanism(df: BaseFrame):
@@ -1631,7 +1649,7 @@ def _is_supported_constant(x):
 def _new_name():
     # name = uuid.uuid4().hex
     global COUNT
-    name = 'T' + str(COUNT)
+    name = 't' + str(COUNT)
     COUNT += 1
     return name
 
@@ -1688,7 +1706,7 @@ def set_database_file(file_name, delete=False):
     global DB_FILE
     global SQL_CON
     DB_FILE = file_name
-    SQL_CON = get_sqlite_connection(DB_FILE)
+    SQL_CON = get_duckdb_connection(DB_FILE)
 
 
 def stop(delete=False):
