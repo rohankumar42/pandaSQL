@@ -82,7 +82,6 @@ class TestOffloading(unittest.TestCase):
 
     #     # Should fail since the result is too big to be brought back
     #     selection = df[df['n'] >= 5]
-    #     print(selection)
     #     self.assertRaises(MemoryError, lambda: selection.compute())
 
     #     # Should run since the result is small enough to be brought back

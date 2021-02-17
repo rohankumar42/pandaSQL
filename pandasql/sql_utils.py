@@ -117,6 +117,5 @@ def get_sqlite_connection(file_name):
 
 
 def get_duckdb_connection(file_name):
-    print('Starting duckdb connection to file', file_name)
     con = duckdb.connect(file_name)
     return con

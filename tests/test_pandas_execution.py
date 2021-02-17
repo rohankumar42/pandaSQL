@@ -232,9 +232,6 @@ class TestPandasExecution(unittest.TestCase):
         # Projection before aggregation with group names in index
         res = df.groupby(['a', 'b'], as_index=True)['c'].sum()
         base_res = base_df.groupby(['a', 'b'], as_index=True)['c'].sum()
-        print(ps.offloading_strategy())
-        print(res.compute(), type(res.compute()))
-        print(base_res, type(base_res))
         assertDataFrameEqualsPandas(res, base_res)
 
     def test_write_column(self):
