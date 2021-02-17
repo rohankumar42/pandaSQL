@@ -65,7 +65,6 @@ class BaseFrame(object):
             else:
                 return None
         elif hasattr(self, 'process_result'):  # Post-process result if needed
-            print('calling self.process_result')
             return self.process_result(self._cached_result)
         else:
             return self._cached_result
@@ -1146,12 +1145,9 @@ class Aggregator(DataFrame):
         return new_prediction
 
     def _pandas(self):
-        print('in agg pandas')
         if self.grouped:
             result = getattr(self.sources[0].result, self.agg)()
-            print('grouped agg pandas, len(columns):', len(result.columns))
             if len(result.columns) == 1:
-                print('agg to series!')
                 result = result[result.columns[0]]
 
         else:
