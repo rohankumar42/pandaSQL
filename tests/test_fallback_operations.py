@@ -23,7 +23,7 @@ class TestFallbackOperations(unittest.TestCase):
         self.assertIsInstance(smallest, ps.core.FallbackOperation)
         assertDataFrameEqualsPandas(smallest, base_smallest)
 
-    def test_run_fallback_on_sqlite(self):
+    def test_run_fallback_on_duckdb(self):
         ps.offloading_strategy('ALWAYS')
 
         base_df = pd.DataFrame([{'n': i, 's': str(i*2)} for i in range(30)])

@@ -65,7 +65,7 @@ def _deep_dependency_graph(df, graph):
 def _fallback_operation(df, graph):
     # TODO: If some operations cannot be done without fallback, this method
     # chooses to run the entire query in Pandas. We should instead explore
-    # running a subset of the query in SQLite, and then running Pandas-only
+    # running a subset of the query on the DB, and then running Pandas-only
     # parts in Pandas.
 
     # Rule does not apply if the result of fallback is already cached

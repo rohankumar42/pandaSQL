@@ -22,7 +22,7 @@ class TestOffloading(unittest.TestCase):
         selection.compute()
         assertDataFrameEqualsPandas(selection, base_selection)
 
-        # Run dependent operation on SQLite
+        # Run dependent operation on duckdb
         ps.offloading_strategy('ALWAYS')
         self.assertIsNone(limit.result)
         self.assertEqual(limit.sql(),
@@ -31,18 +31,18 @@ class TestOffloading(unittest.TestCase):
         limit.compute()
         assertDataFrameEqualsPandas(limit, base_limit)
 
-    def test_run_with_missing_dependencies_sqlite(self):
+    def test_run_with_missing_dependencies_duckdb(self):
         ps.offloading_strategy('ALWAYS')
 
         base_df = pd.DataFrame([{'n': i, 's': str(i*2)} for i in range(10)])
         base_selection = base_df[base_df['n'] >= 5]
 
-        # Should run on SQLite since original data was offloaded
+        # Should run on duckdb since original data was offloaded
         df = ps.DataFrame(base_df, offload=True)
         selection = df[df['n'] >= 5]
         assertDataFrameEqualsPandas(selection, base_selection)
 
-        # Should not run on SQLite since original data was not offloaded
+        # Should not run on duckdb since original data was not offloaded
         df = ps.DataFrame(base_df, offload=False)
         selection = df[df['n'] >= 5]
         self.assertRaises(RuntimeError, lambda: selection.compute())
@@ -104,12 +104,12 @@ class TestOffloading(unittest.TestCase):
     #     old_factor = ps.memory_utils.SAFETY_FACTOR
     #     ps.memory_utils.SAFETY_FACTOR = new_factor
 
-    #     # Should execute, but on SQLite since ordered is expected to run
+    #     # Should execute, but on duckdb since ordered is expected to run
     #     # out of memory
     #     ordered = df.sort_values(by='n', ascending=False)
     #     ordered._compute_pandas()
     #     self.assertFalse(ordered._computed_on_pandas)
-    #     self.assertTrue(ordered._cached_on_sqlite)
+    #     self.assertTrue(ordered._cached_on_duckdb)
     #     self.assertTrue(ordered._out_of_memory)
     #     self.assertIsNone(ordered._cached_result)
     #     self.assertRaises(MemoryError, lambda: ordered.compute())
@@ -131,16 +131,16 @@ class TestOffloading(unittest.TestCase):
         old_factor = ps.memory_utils.SAFETY_FACTOR
         ps.memory_utils.SAFETY_FACTOR = new_factor
 
-        # Should execute, but on SQLite since ordered is expected to run
+        # Should execute, but on duckdb since ordered is expected to run
         # out of memory. The limit should be small enough to be fetched
-        # back to Pandas from SQLite.
+        # back to Pandas from duckdb.
         ordered = df.sort_values(by='n', ascending=False)
         limit = ordered[:10]
         limit.compute()
         self.assertFalse(ordered._computed_on_pandas)
-        self.assertFalse(ordered._cached_on_sqlite)
+        self.assertFalse(ordered._cached_on_duckdb)
         self.assertFalse(limit._computed_on_pandas)
-        self.assertTrue(limit._cached_on_sqlite)
+        self.assertTrue(limit._cached_on_duckdb)
         self.assertFalse(limit._out_of_memory)
         assertDataFrameEqualsPandas(limit, base_limit)
 

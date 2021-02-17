@@ -18,7 +18,6 @@ DB_FILE = mktemp("_pandasql.db")
 SQL_CON = get_duckdb_connection(DB_FILE)
 OFFLOADING_STRATEGY = None
 USE_MEMORY_PREDICTION = None
-SQLITE_CHUNK_SIZE = 10000
 COST_MODEL = CostModel()
 MAGIC_SEP = '_pandasqlseparator_'
 
@@ -41,7 +40,7 @@ class BaseFrame(object):
         self.pandas_sources = pandas_sources or []
         self.dependents = []
         self._cached_result = None
-        self._cached_on_sqlite = False
+        self._cached_on_duckdb = False
         self._computed_on_pandas = False
         self._out_of_memory = False
         self.update = None
@@ -85,9 +84,9 @@ class BaseFrame(object):
 
     def _offload(self):
         assert(self._cached_result is not None)
-        if not self._cached_on_sqlite:
+        if not self._cached_on_duckdb:
             SQL_CON.register(self.name, self._cached_result)
-            self._cached_on_sqlite = True
+            self._cached_on_duckdb = True
 
     def compute(self):
         # TODO: explore if there are situations when some part of the
@@ -95,9 +94,9 @@ class BaseFrame(object):
 
         if self._cached_result is None:
             # TODO: If A is computed on Pandas, and B depends on A and
-            # is about to be computed on SQLite, should A be computed as
+            # is about to be computed on the DB, should A be computed as
             # part of B's SQL query, or should A's result be first transferred
-            # to SQLite? Probably not one-size-fits-all.
+            # to the DB? Probably not one-size-fits-all.
             on = choose_compute_mechanism(self)
             if not _is_computable(self, on=on):
                 raise RuntimeError('Offload engine chose to compute '
@@ -105,8 +104,8 @@ class BaseFrame(object):
                                    'be done, either because of missing '
                                    'dependencies, or Pandas-only operations.')
 
-            if on == 'sqlite':
-                self._compute_sqlite()
+            if on == 'duckdb':
+                self._compute_duckdb()
             else:
                 self._compute_pandas()
 
@@ -120,7 +119,7 @@ class BaseFrame(object):
             # Compute all dependencies in order. Before computing each
             # dependency, predict if its computation will fit in memory.
             # If so, compute on Pandas (as requested). Otherwise,
-            # offload the computation to SQLite.
+            # offload the computation to the DB.
             for i, t in enumerate(ordered_deps):
                 if t.result is None and isinstance(t, BaseFrame):
                     if t.update is None:
@@ -135,7 +134,7 @@ class BaseFrame(object):
                     # Run on Pandas if the operation is supported only via
                     # Pandas, or if it is not expected to run out of memory
                     # TODO: Fallback operations might run out of memory but
-                    # we can't run them on SQLite! Log a warning for them?
+                    # we can't run them on the DB! Log a warning for them?
                     pandas_only = isinstance(t, FallbackOperation)
                     if pandas_only or not too_big:
                         if t.update is None:
@@ -148,7 +147,7 @@ class BaseFrame(object):
                         t._computed_on_pandas = True
 
                         # TODO(important): when should this result be
-                        # offloaded to SQLite?
+                        # offloaded to the DB?
                         if offload:
                             t._offload()
 
@@ -157,30 +156,30 @@ class BaseFrame(object):
                             t._count = len(t._cached_result)
 
                     # The next operation is too big for Pandas, so run the
-                    # remainder of the computation on SQLite
+                    # remainder of the computation on the DB
                     else:
                         # TODO: For each dependency, decide whether it should
-                        # be transferred or recomputed on SQLite
-                        if not _is_computable(t, on='sqlite'):
-                            # All dependencies do not exist on SQLite,
+                        # be transferred or recomputed on the DB
+                        if not _is_computable(t, on='duckdb'):
+                            # All dependencies do not exist on the DB,
                             # so transfer all sources
                             for j in range(i):
                                 ordered_deps[j]._offload()
 
-                        # Run the remainder of the computation on SQLite
-                        assert(_is_computable(self, on='sqlite'))
-                        self._compute_sqlite()
+                        # Run the remainder of the computation on the DB
+                        assert(_is_computable(self, on='duckdb'))
+                        self._compute_duckdb()
 
                         # Break out of loop; no more dependencies to compute
                         break
 
-    def _compute_sqlite(self):
-        if not self._cached_on_sqlite:
-            # Compute result and store in SQLite table
+    def _compute_duckdb(self):
+        if not self._cached_on_duckdb:
+            # Compute result and store in the DB table
             query = self.sql(dependencies=True)
             compute_query = 'CREATE TABLE {} AS {}'.format(self.name, query)
             SQL_CON.execute(compute_query)
-            self._cached_on_sqlite = True
+            self._cached_on_duckdb = True
 
         if self._cached_result is None:
             # TODO: DuckDB does not have DBSTAT tracking. If we still want to
@@ -496,7 +495,7 @@ class StringOperator(object):
 
 class DataFrame(BaseFrame):
     def __init__(self, data=None, name=None, sources=None, pandas_sources=None,
-                 deep_copy=False, offload=True, loaded_on_sqlite=False):
+                 deep_copy=False, offload=True, loaded_on_duckdb=False):
         super().__init__(name=name, sources=sources,
                          pandas_sources=pandas_sources)
         df = None
@@ -518,13 +517,13 @@ class DataFrame(BaseFrame):
                             .format(type(data)))
 
         if self._cached_result is not None and len(self._cached_result) > 0:
-            if offload:  # Offload dataframe to SQLite
+            if offload:  # Offload dataframe to the DB
                 self._offload()
             # Store columns
             self.columns = self._cached_result.columns
 
-        elif loaded_on_sqlite:
-            self._cached_on_sqlite = True
+        elif loaded_on_duckdb:
+            self._cached_on_duckdb = True
 
         # Compute stats about data, if it exists on Pandas
         if isinstance(self._cached_result, pd.DataFrame):
@@ -1112,7 +1111,7 @@ class Aggregator(DataFrame):
         self.columns = source.columns
 
         # Set return types in cases where explicit conversion is needed,
-        # e.g., bool because SQLite doesn't have bools
+        # e.g., bool because the DB doesn't have bools
         if self.agg_sql in ['AGG_ANY', 'AGG_ALL']:
             self.final_type = bool
         else:
@@ -1273,7 +1272,7 @@ class FallbackOperation(DataFrame):
 
     def _predict_memory_from_sources(self):
         # TODO: We do not have memory predictions for fallback operations.
-        # Since we cannot run fallback operations on SQLite anyway,
+        # Since we cannot run fallback operations on the DB anyway,
         # we will never use this to decide that this computation will run out
         # of memory on Pandas.
         return 0
@@ -1569,11 +1568,11 @@ def use_memory_prediction(value=None):
 
 def choose_compute_mechanism(df: BaseFrame):
     if OFFLOADING_STRATEGY == 'ALWAYS':
-        return 'sqlite'
+        return 'duckdb'
     elif OFFLOADING_STRATEGY == 'NEVER':
         return 'pandas'
     elif OFFLOADING_STRATEGY == 'BEST':
-        return 'sqlite' if COST_MODEL.should_offload(df) else 'pandas'
+        return 'duckdb' if COST_MODEL.should_offload(df) else 'pandas'
     else:
         raise NotImplementedError('Unsupported offloading strategy: {}'
                                   .format(OFFLOADING_STRATEGY))
@@ -1582,8 +1581,8 @@ def choose_compute_mechanism(df: BaseFrame):
 def _is_computable(df, on):
     if on == 'pandas':
         def is_cached(x): return x._cached_result is not None
-    elif on == 'sqlite':
-        def is_cached(x): return x._cached_on_sqlite
+    elif on == 'duckdb':
+        def is_cached(x): return x._cached_on_duckdb
     else:
         raise ValueError(f'Unknown computation mechanism: {on}')
 
@@ -1610,8 +1609,8 @@ def _is_computable(df, on):
         return False
 
     # If there are any pending operations that are Pandas-only
-    # (i.e., supported via fallbacks), then we cannot run on SQLite.
-    if on == 'sqlite':
+    # (i.e., supported via fallbacks), then we cannot run on the DB.
+    if on == 'duckdb':
         fallbacks = _filter_ancestors(df, graph, lambda x: not is_cached(x) and
                                       isinstance(x, FallbackOperation),
                                       max_depth=None)
@@ -1648,18 +1647,18 @@ def _new_name():
 
 
 def _define_dependencies(df: DataFrame):
-    graph = _get_dependency_graph(df, on='sqlite')
+    graph = _get_dependency_graph(df, on='duckdb')
     ordered_deps = _topological_sort(graph)
 
     # Do NOT define a dependency t if any of the following is true:
     #   (1) t is the current df
-    #   (2) t is already cached on SQLite
+    #   (2) t is already cached on the DB
     #   (3) t is a GroupByDataFrame object
     #   (4) t is a Criterion object (won't be in graph)
     common_table_exprs = [
         '{} AS ({})'.format(t.name, t.sql(dependencies=False))
         for t in ordered_deps
-        if t is not df and not t._cached_on_sqlite and isinstance(t, DataFrame)
+        if t is not df and not t._cached_on_duckdb and isinstance(t, DataFrame)
     ]
 
     if len(common_table_exprs) > 0:
@@ -1683,7 +1682,7 @@ def _make_projection_or_constant(x, simple=False, arithmetic=True):
 
 
 ##############################################################################
-#                           Public SQLite Functions
+#                           Public DB Functions
 ##############################################################################
 
 

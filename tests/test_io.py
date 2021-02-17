@@ -29,7 +29,7 @@ class TestIO(unittest.TestCase):
 
         assertDataFrameEqualsPandas(df, base_df)
 
-    def test_loading_csv_sqlite(self):
+    def test_loading_csv_duckdb(self):
         df = ps.read_csv(self.FILE_NAME, sql_load=True)
         base_df = pd.read_csv(self.FILE_NAME)
 

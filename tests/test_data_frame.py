@@ -247,7 +247,7 @@ class TestDataFrame(unittest.TestCase):
         self.assertIsInstance(selection.result, pd.DataFrame)
         self.assertEqual(out, str(df[df['n'] < 5]))
 
-    def test_caching_in_sqlite(self):
+    def test_caching_in_duckdb(self):
         base_df_1 = pd.DataFrame([{'n': i, 's1': str(i*2)} for i in range(10)])
         base_df_2 = pd.DataFrame([{'n': i, 's2': str(i*2)} for i in range(10)])
         T1 = ps.DataFrame(base_df_1)
@@ -256,7 +256,7 @@ class TestDataFrame(unittest.TestCase):
         S2 = T2[T2['n'] >= 3]
         merged = S1.merge(S2, on='n')
 
-        # Compute S1, so its result is cached in SQLite
+        # Compute S1, so its result is cached in duckdb
         S1.compute()
 
         # Now, the query for merged should not declare S1 again
@@ -530,7 +530,7 @@ class TestDataFrame(unittest.TestCase):
         df = ps.DataFrame(base_df)
 
         # TODO: as_index=True does not work because indexes are not
-        # currently synchronized with SQLite
+        # currently synchronized with duckdb
         agg = df.groupby('r').sum()
         base_agg = base_df.groupby('r', as_index=False).sum()
 

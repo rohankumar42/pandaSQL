@@ -25,7 +25,7 @@ def read_csv(file_name, name=None, sql_load=False, **kwargs):
         return _read_csv_by_chunking(file_name, name=name, **kwargs)
 
     return DataFrame(pd.read_csv(file_name, **kwargs), name=name,
-                     offload=True, loaded_on_sqlite=False)
+                     offload=True, loaded_on_duckdb=False)
 
 
 def read_json(*args, name=None, **kwargs):
@@ -72,7 +72,7 @@ def _csv_to_duckdb(file_name, name, **kwargs):
     else:
         column_index = pd.Index(column_names)
 
-    df = DataFrame(None, name=name, offload=False, loaded_on_sqlite=True)
+    df = DataFrame(None, name=name, offload=False, loaded_on_duckdb=True)
     df.columns = column_index
     return df
 
@@ -83,6 +83,6 @@ def _read_csv_by_chunking(file_name, name, **kwargs):
         chunk.to_sql(name=name, con=SQL_CON, index=False, if_exists='append')
         cols = chunk.columns
 
-    df = DataFrame(None, name=name, offload=False, loaded_on_sqlite=True)
+    df = DataFrame(None, name=name, offload=False, loaded_on_duckdb=True)
     df.columns = cols
     return df

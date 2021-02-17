@@ -2,7 +2,7 @@ from queue import Queue
 from collections import defaultdict
 
 
-def _get_dependency_graph(df, on='sqlite'):
+def _get_dependency_graph(df, on='duckdb'):
     dependencies = {}
 
     def add_dependencies(child):
