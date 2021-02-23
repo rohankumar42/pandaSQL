@@ -1,5 +1,6 @@
 import subprocess
 
+import numpy as np
 import pandas as pd
 from pandasql.core import DB_FILE, SQL_CON, DataFrame, _new_name
 from pandasql.memory_utils import _estimate_pandas_memory_from_csv, \
@@ -55,6 +56,27 @@ def _csv_to_sqlite(file_name, name, **kwargs):
     return df
 
 
+def _convert_dtype_to_duckdb(dtype):
+    if isinstance(dtype, np.dtype):
+        dtype = dtype.name
+    dtype = dtype.lower()
+    if dtype.startswith('int'):
+        if dtype.endswith('64'):
+            return 'LONG'
+        else:
+            return 'INTEGER'
+    elif dtype == 'float':
+        return 'REAL'
+    elif dtype == 'double':
+        return 'DOUBLE'
+    elif dtype in {'object', 'str', 'string', 'varchar', 'char'}:
+        return 'VARCHAR'
+    elif dtype.startswith('bool'):
+        return 'BOOLEAN'
+    else:
+        raise ValueError(f'Could not convert dtype {dtype} to DuckDB type')
+
+
 def _csv_to_duckdb(file_name, name, **kwargs):
     SQL_CON.execute(
         f"CREATE TABLE {name} AS "
@@ -71,6 +93,16 @@ def _csv_to_duckdb(file_name, name, **kwargs):
         column_index = pd.Index(kwargs['names'])
     else:
         column_index = pd.Index(column_names)
+
+    if 'dtype' in kwargs:
+        # If dtypes are specified explicitly, alter column types in DuckDB
+        dtypes = kwargs['dtype']
+        if isinstance(dtypes, list):
+            dtypes = dict(zip(column_index, dtypes))
+        for col, dtype in dtypes.items():
+            duckdb_type = _convert_dtype_to_duckdb(dtype)
+            SQL_CON.execute(f"ALTER TABLE {name} "
+                            f"ALTER {col} TYPE {duckdb_type};")
 
     df = DataFrame(None, name=name, offload=False, loaded_on_duckdb=True)
     df.columns = column_index
