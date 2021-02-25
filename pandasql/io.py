@@ -80,7 +80,7 @@ def _convert_dtype_to_duckdb(dtype):
 def _csv_to_duckdb(file_name, name, **kwargs):
     SQL_CON.execute(
         f"CREATE TABLE {name} AS "
-        f"SELECT * FROM read_csv_auto('{file_name}');")
+        f"SELECT * FROM read_csv_auto('{file_name}', SAMPLE_SIZE=10000);")
 
     description = SQL_CON.execute(f'DESCRIBE {name};').fetchall()
     column_names = [info[0] for info in description]
